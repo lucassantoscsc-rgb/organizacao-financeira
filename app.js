@@ -5,9 +5,9 @@
 
 const CONFIG = {
   nomeApp: 'Organização Financeira',
-  // Para exigir um código de liberação, coloque os códigos aqui, ex.: ['BRIO2026'].
-  // Lista vazia = app aberto para quem tiver o link.
-  codigosAcesso: [],
+  // true = pede código de acesso na primeira abertura.
+  // Os códigos válidos ficam na Vercel (variável ACCESS_CODES), não aqui.
+  exigirCodigo: true,
   frases: [
     'Pequenas ações geram grandes resultados.',
     'Quem anota, controla. Quem controla, conquista.',
@@ -121,7 +121,7 @@ const ICON = {
 
 function render(){
   memo = {};
-  if (CONFIG.codigosAcesso.length && !S.liberado) return renderAcesso();
+  if (CONFIG.exigirCodigo && !S.liberado) return renderAcesso();
   if (!S.perfil.ok) return renderOnboarding();
   const p = S.perfil;
   const saud = p.pronome==='Femininos' ? 'Bem-vinda' : p.pronome==='Masculinos' ? 'Bem-vindo' : 'Boas-vindas';
@@ -469,9 +469,12 @@ document.addEventListener('click', e=>{
     salvar(); render();
   }
   else if (a==='liberar'){
-    const c = document.getElementById('aCod').value.trim().toUpperCase();
-    if (CONFIG.codigosAcesso.map(x=>x.toUpperCase()).includes(c)){ S.liberado=true; salvar(); render(); }
-    else toast('Código inválido');
+    const c = document.getElementById('aCod').value.trim();
+    if (!c) return toast('Digite o seu código');
+    fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c}) })
+      .then(r => r.json().then(d => ({ok:r.ok, d})))
+      .then(({ok,d}) => { if (ok && d.ok){ S.liberado=true; salvar(); render(); } else toast(d.erro || 'Código inválido'); })
+      .catch(() => toast('Sem internet. Conecte-se para liberar o acesso.'));
   }
 });
 

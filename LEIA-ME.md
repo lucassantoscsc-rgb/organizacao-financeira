@@ -20,22 +20,17 @@ O app precisa estar em um link **https** para poder ser instalado. Os dois servi
 
 Depois de instalado, abre como app, em tela cheia, e funciona sem internet.
 
-## Liberar só para quem comprou (opcional)
+## Código de acesso (só para quem comprou)
 
-No começo do arquivo `app.js`, troque:
+O app pede um código na primeira abertura. O código é conferido no servidor da Vercel
+(arquivo `api/liberar.js`), então não aparece no código do app.
 
-```js
-codigosAcesso: [],
-```
-
-por, por exemplo:
-
-```js
-codigosAcesso: ['BRIO2026'],
-```
-
-e envie o código junto com o link na entrega da Cakto/Payt. Quem abrir o link sem o código vê uma tela pedindo o código.
-Observação: é uma trava simples (fica no próprio app), suficiente para venda low ticket, mas não substitui login com servidor.
+- Os códigos válidos ficam na Vercel: **Project → Settings → Environment Variables**,
+  variável `ACCESS_CODES`, separados por vírgula. Ex.: `BRIO2026,CLIENTEVIP`.
+- Depois de mudar a variável, faça **Redeploy** (aba Deployments → ⋯ → Redeploy).
+- Para trocar o código de novas vendas, adicione o novo e remova o antigo. Quem já liberou continua liberado.
+- Para abrir o app sem código, troque `exigirCodigo: true` por `false` no começo do `app.js`.
+- Envie o código junto com o link na entrega da Cakto/Payt.
 
 ## Personalizar
 
