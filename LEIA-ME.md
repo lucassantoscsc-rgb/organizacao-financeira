@@ -20,26 +20,23 @@ O app precisa estar em um link **https** para poder ser instalado. Os dois servi
 
 Depois de instalado, abre como app, em tela cheia, e funciona sem internet.
 
-## Código de acesso (um por cliente)
+## Acesso só para quem comprou (automático pela Cakto)
 
-Cada cliente recebe um código próprio que libera **um único aparelho**.
-O código é conferido no servidor da Vercel (`api/liberar.js`) e fica guardado num banco Redis (Upstash).
+O cliente entra no app com o **e-mail usado na compra**. Cada e-mail libera **um único aparelho**.
 
-**A cada venda na Cakto:**
-1. Abra `SEU-LINK/admin.html` e entre com a senha do painel.
-2. Digite o nome ou e-mail do cliente e clique em **Gerar código**.
-3. Clique em **Copiar mensagem para o cliente** e envie (WhatsApp ou e-mail).
+- A cada venda aprovada, a Cakto avisa o app (webhook `api/cakto.js`) e o e-mail é cadastrado sozinho.
+- Reembolso ou chargeback: o e-mail é removido (não libera novos aparelhos).
+- Painel `SEU-LINK/admin.html`: ver compradores, **Liberar de novo** (cliente trocou de celular),
+  excluir, e gerar códigos manuais para vendas fora da Cakto.
 
-**Cliente trocou de celular:** no painel, ache o código e clique em **Liberar de novo**.
-**Excluir um código:** ele deixa de funcionar para novos aparelhos (quem já liberou continua usando).
+**Configuração (uma vez só):**
+- Vercel → **Storage → Upstash for Redis** ligado ao projeto.
+- Vercel → variáveis `ADMIN_SENHA` (senha do painel) e `CAKTO_SECRET` (o secret do webhook da Cakto).
+- `ACCESS_CODES` (opcional): códigos fixos sem limite de aparelhos, separados por vírgula.
+- Cakto → webhook com a URL `SEU-LINK/api/cakto`, eventos **Compra aprovada**, **Reembolso** e **Chargeback**.
+- Depois de mudar variáveis na Vercel, faça **Redeploy**.
 
-**Configuração na Vercel (uma vez só):**
-- **Storage → Upstash for Redis** ligado ao projeto (cria as variáveis `KV_REST_API_URL` e `KV_REST_API_TOKEN`).
-- Variável `ADMIN_SENHA`: a senha do painel (mínimo 6 caracteres).
-- Variável `ACCESS_CODES` (opcional): códigos fixos sem limite de aparelhos, separados por vírgula.
-- Depois de mudar variáveis, faça **Redeploy**.
-
-Para abrir o app sem código, troque `exigirCodigo: true` por `false` no começo do `app.js`.
+Para abrir o app sem pedir acesso, troque `exigirCodigo: true` por `false` no começo do `app.js`.
 
 ## Personalizar
 

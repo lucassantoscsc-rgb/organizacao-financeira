@@ -477,7 +477,7 @@ document.addEventListener('click', e=>{
   }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
-    if (!c) return toast('Digite o seu código');
+    if (!c) return toast('Digite o e-mail da compra');
     fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c, aparelho:idAparelho()}) })
       .then(r => r.json().then(d => ({ok:r.ok, d})))
       .then(({ok,d}) => { if (ok && d.ok){ S.liberado=true; salvar(); render(); } else toast(d.erro || 'Código inválido'); })
@@ -515,8 +515,8 @@ function renderAcesso(){
   $app.innerHTML = `<div class="onb"><div class="in">
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>${esc(CONFIG.nomeApp)}</h1>
-    <p>Digite o código de acesso que você recebeu junto com a sua compra.</p>
-    <div class="f"><label>Código de acesso</label><input id="aCod" autocapitalize="characters" placeholder="Seu código"></div>
+    <p>Digite o e-mail que você usou na compra para liberar o app neste aparelho.</p>
+    <div class="f"><label>E-mail da compra (ou código de acesso)</label><input id="aCod" type="email" inputmode="email" autocapitalize="none" autocomplete="email" placeholder="seuemail@exemplo.com"></div>
     <button class="btn pri" data-act="liberar">Liberar acesso</button>
   </div></div>`;
 }

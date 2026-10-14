@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>Códigos de acesso</title>
+<title>Acessos</title>
 <link rel="icon" href="icons/icon-192.png">
 <style>
 :root{--deep:#0b3b3a;--mint:#14b8a6;--bg:#f3f7f6;--surface:#fff;--line:#e3ebe9;--ink:#10201f;--muted:#5f7472;
@@ -37,7 +37,7 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
 </style>
 </head>
 <body>
-<header><h1>Códigos de acesso</h1></header>
+<header><h1>Acessos</h1></header>
 <main>
   <div class="card" id="login">
     <h2>Entrar</h2>
@@ -48,7 +48,7 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
 
   <div id="painel" hidden>
     <div class="card">
-      <h2>Nova venda</h2>
+      <h2>Gerar código manual <span style="font-weight:400;color:var(--muted)">(vendas fora da Cakto, brindes)</span></h2>
       <label for="nota">Nome ou e-mail do cliente (opcional)</label>
       <div class="row"><input id="nota" placeholder="maria@email.com"><button id="gerar">Gerar código</button></div>
       <div class="novo" id="novo">
@@ -58,8 +58,8 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
       </div>
     </div>
     <div class="card">
-      <h2>Códigos</h2>
-      <div class="filtro"><input id="busca" placeholder="Buscar por código ou cliente"></div>
+      <h2>Compradores e códigos</h2>
+      <div class="filtro"><input id="busca" placeholder="Buscar por e-mail, nome ou código"></div>
       <div class="stats" id="stats"></div>
       <div id="lista"></div>
     </div>
@@ -95,7 +95,7 @@ function desenhar(){
   const q = document.getElementById('busca').value.trim().toLowerCase();
   const vis = todos.filter(x => !q || x.codigo.toLowerCase().includes(q) || (x.nota||'').toLowerCase().includes(q));
   const usados = todos.filter(x=>x.usadoEm).length;
-  document.getElementById('stats').textContent = `${todos.length} códigos · ${usados} usados · ${todos.length-usados} livres`;
+  document.getElementById('stats').textContent = `${todos.length} acessos · ${usados} já usados · ${todos.length-usados} ainda não usados`;
   document.getElementById('lista').innerHTML = vis.map(x => `
     <div class="item">
       <span class="c">${esc(x.codigo)}</span>
@@ -128,8 +128,8 @@ document.getElementById('copiar').onclick = async () => {
 document.getElementById('lista').onclick = async e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const c = b.dataset.c;
-  if (b.dataset.a==='bloquear' && !confirm(`Excluir o código ${c}? Ele deixa de funcionar para novos aparelhos.`)) return;
-  if (b.dataset.a==='resetar' && !confirm(`Liberar ${c} para ser usado em um novo aparelho?`)) return;
+  if (b.dataset.a==='bloquear' && !confirm(`Excluir ${c}? Deixa de funcionar para novos aparelhos.`)) return;
+  if (b.dataset.a==='resetar' && !confirm(`Liberar ${c} para entrar em um novo aparelho?`)) return;
   await api({ acao:b.dataset.a, codigo:c }); carregar();
 };
 if (senha) entrar();

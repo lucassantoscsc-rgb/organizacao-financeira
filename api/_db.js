@@ -15,6 +15,10 @@ async function redis(...cmd) {
   return d.result;
 }
 
-const normalizar = (c) => String(c || '').trim().toUpperCase();
+// E-mail fica em minúsculas, código em maiúsculas.
+const normalizar = (c) => {
+  const v = String(c || '').trim();
+  return v.includes('@') ? v.toLowerCase() : v.toUpperCase();
+};
 
 module.exports = { redis, normalizar };
