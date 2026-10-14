@@ -1,10 +1,30 @@
 // Confere o código de acesso no servidor (Vercel).
-// Os códigos ficam na variável de ambiente ACCESS_CODES, separados por vírgula.
-module.exports = (req, res) => {
+// Cada código (criado em /admin.html) libera um único aparelho.
+// ACCESS_CODES (opcional): códigos fixos, sem limite de aparelhos, separados por vírgula.
+const { redis, normalizar } = require('./_db');
+
+module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
-  const validos = (process.env.ACCESS_CODES || '')
-    .split(',').map((x) => x.trim().toUpperCase()).filter(Boolean);
-  const codigo = String((req.body && req.body.codigo) || '').trim().toUpperCase();
-  if (codigo && validos.includes(codigo)) return res.status(200).json({ ok: true });
-  res.status(401).json({ ok: false, erro: 'Código inválido' });
+  const codigo = normalizar(req.body && req.body.codigo);
+  const aparelho = String((req.body && req.body.aparelho) || '').slice(0, 64);
+  if (!codigo) return res.status(401).json({ ok: false, erro: 'Código inválido' });
+
+  const fixos = (process.env.ACCESS_CODES || '').split(',').map(normalizar).filter(Boolean);
+  if (fixos.includes(codigo)) return res.status(200).json({ ok: true });
+
+  try {
+    if (!(await redis('HEXISTS', 'codigos', codigo)))
+      return res.status(401).json({ ok: false, erro: 'Código inválido' });
+    if (!aparelho) return res.status(400).json({ ok: false, erro: 'Atualize o app e tente de novo' });
+
+    const uso = JSON.stringify({ aparelho, em: new Date().toISOString() });
+    if (await redis('HSETNX', 'usos', codigo, uso)) return res.status(200).json({ ok: true });
+
+    // Já usado: só libera de novo se for o mesmo aparelho.
+    const atual = JSON.parse((await redis('HGET', 'usos', codigo)) || '{}');
+    if (atual.aparelho === aparelho) return res.status(200).json({ ok: true });
+    res.status(409).json({ ok: false, erro: 'Este código já foi usado em outro aparelho. Fale com o suporte.' });
+  } catch (e) {
+    res.status(500).json({ ok: false, erro: 'Erro no servidor. Tente de novo em instantes.' });
+  }
 };

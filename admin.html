@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Códigos de acesso</title>
+<link rel="icon" href="icons/icon-192.png">
+<style>
+:root{--deep:#0b3b3a;--mint:#14b8a6;--bg:#f3f7f6;--surface:#fff;--line:#e3ebe9;--ink:#10201f;--muted:#5f7472;
+  --good:#0f9f6e;--bad:#d64045;--warn:#b7791f;--shadow:0 1px 2px rgba(11,59,58,.06),0 6px 20px rgba(11,59,58,.06)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+header{background:var(--deep);color:#fff;padding:18px 16px}
+header h1{margin:0;font-size:20px}
+main{max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--surface);border-radius:18px;box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+.card h2{margin:0 0 12px;font-size:15px}
+label{font-size:13px;color:var(--muted);display:block;margin-bottom:4px}
+input{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink)}
+button{font:inherit;border:0;border-radius:12px;padding:12px 16px;cursor:pointer;background:var(--mint);color:#06302d;font-weight:600}
+button.sec{background:var(--bg);color:var(--ink);font-weight:500;padding:8px 12px;font-size:14px}
+button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;font-size:14px}
+.row{display:flex;gap:8px;margin-top:10px}.row input{flex:1}
+.novo{margin-top:14px;padding:14px;border-radius:14px;background:#e6faf6;display:none}
+.novo b{font-size:22px;letter-spacing:.04em;font-variant-numeric:tabular-nums}
+.novo pre{white-space:pre-wrap;font:14px/1.4 inherit;margin:10px 0;background:#fff;padding:10px;border-radius:10px}
+.filtro{display:flex;gap:8px;margin-bottom:10px}
+.item{border-top:1px solid var(--line);padding:12px 0;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.item .c{font-weight:700;font-variant-numeric:tabular-nums}
+.item .n{color:var(--muted);font-size:14px;flex-basis:100%}
+.item .acts{margin-left:auto;display:flex;gap:6px}
+.tag{font-size:12px;padding:2px 8px;border-radius:999px}
+.tag.l{background:#e6faf6;color:var(--good)}.tag.u{background:#fdf3e1;color:var(--warn)}
+.stats{color:var(--muted);font-size:14px;margin-bottom:8px}
+#msg{color:var(--bad);font-size:14px;margin-top:8px}
+</style>
+</head>
+<body>
+<header><h1>Códigos de acesso</h1></header>
+<main>
+  <div class="card" id="login">
+    <h2>Entrar</h2>
+    <label for="senha">Senha do painel</label>
+    <div class="row"><input id="senha" type="password" autocomplete="current-password"><button id="entrar">Entrar</button></div>
+    <div id="msg"></div>
+  </div>
+
+  <div id="painel" hidden>
+    <div class="card">
+      <h2>Nova venda</h2>
+      <label for="nota">Nome ou e-mail do cliente (opcional)</label>
+      <div class="row"><input id="nota" placeholder="maria@email.com"><button id="gerar">Gerar código</button></div>
+      <div class="novo" id="novo">
+        Código gerado: <b id="novoCod"></b>
+        <pre id="msgCliente"></pre>
+        <button id="copiar">Copiar mensagem para o cliente</button>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Códigos</h2>
+      <div class="filtro"><input id="busca" placeholder="Buscar por código ou cliente"></div>
+      <div class="stats" id="stats"></div>
+      <div id="lista"></div>
+    </div>
+  </div>
+</main>
+<script>
+const LINK = location.origin;
+let senha = '';
+try { senha = sessionStorage.getItem('adm') || ''; } catch(e){}
+let todos = [];
+
+async function api(dados){
+  const r = await fetch('api/admin', { method:'POST',
+    headers:{ 'Content-Type':'application/json', 'x-admin-senha':senha }, body:JSON.stringify(dados) });
+  const d = await r.json().catch(()=>({ ok:false, erro:'Erro no servidor' }));
+  if (r.status === 401){ sair(d.erro); throw 0; }
+  if (!d.ok){ alert(d.erro || 'Erro'); throw 0; }
+  return d;
+}
+function sair(m){ senha=''; try{sessionStorage.removeItem('adm')}catch(e){}
+  document.getElementById('painel').hidden=true; document.getElementById('login').hidden=false;
+  document.getElementById('msg').textContent = m || ''; }
+async function entrar(){
+  try { await carregar(); } catch(e){ return; }
+  try{sessionStorage.setItem('adm',senha)}catch(e){}
+  document.getElementById('login').hidden=true; document.getElementById('painel').hidden=false;
+}
+const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const data = iso => iso ? new Date(iso).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : '';
+
+async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); }
+function desenhar(){
+  const q = document.getElementById('busca').value.trim().toLowerCase();
+  const vis = todos.filter(x => !q || x.codigo.toLowerCase().includes(q) || (x.nota||'').toLowerCase().includes(q));
+  const usados = todos.filter(x=>x.usadoEm).length;
+  document.getElementById('stats').textContent = `${todos.length} códigos · ${usados} usados · ${todos.length-usados} livres`;
+  document.getElementById('lista').innerHTML = vis.map(x => `
+    <div class="item">
+      <span class="c">${esc(x.codigo)}</span>
+      ${x.usadoEm ? `<span class="tag u">usado em ${data(x.usadoEm)}</span>` : '<span class="tag l">livre</span>'}
+      <span class="acts">
+        ${x.usadoEm ? `<button class="sec" data-a="resetar" data-c="${esc(x.codigo)}">Liberar de novo</button>` : ''}
+        <button class="del" data-a="bloquear" data-c="${esc(x.codigo)}">Excluir</button>
+      </span>
+      <span class="n">${esc(x.nota) || 'sem nome'} · criado em ${data(x.criado)}</span>
+    </div>`).join('') || '<p class="stats">Nenhum código ainda.</p>';
+}
+
+document.getElementById('entrar').onclick = () => { senha = document.getElementById('senha').value; entrar(); };
+document.getElementById('senha').onkeydown = e => { if (e.key==='Enter') document.getElementById('entrar').click(); };
+document.getElementById('busca').oninput = desenhar;
+document.getElementById('gerar').onclick = async () => {
+  const nota = document.getElementById('nota').value.trim();
+  const { codigo } = await api({ acao:'gerar', nota });
+  document.getElementById('novoCod').textContent = codigo;
+  document.getElementById('msgCliente').textContent =
+    `Obrigado pela compra! 🎉\n\nAcesse o app: ${LINK}\nSeu código de acesso: ${codigo}\n\nO código libera 1 aparelho. No celular, abra o link e use "Adicionar à Tela de Início" (iPhone) ou "Instalar app" (Android).`;
+  document.getElementById('novo').style.display = 'block';
+  document.getElementById('nota').value = '';
+  carregar();
+};
+document.getElementById('copiar').onclick = async () => {
+  try { await navigator.clipboard.writeText(document.getElementById('msgCliente').textContent); alert('Mensagem copiada!'); }
+  catch(e){ alert('Não consegui copiar. Selecione o texto e copie manualmente.'); }
+};
+document.getElementById('lista').onclick = async e => {
+  const b = e.target.closest('button[data-a]'); if (!b) return;
+  const c = b.dataset.c;
+  if (b.dataset.a==='bloquear' && !confirm(`Excluir o código ${c}? Ele deixa de funcionar para novos aparelhos.`)) return;
+  if (b.dataset.a==='resetar' && !confirm(`Liberar ${c} para ser usado em um novo aparelho?`)) return;
+  await api({ acao:b.dataset.a, codigo:c }); carregar();
+};
+if (senha) entrar();
+</script>
+</body>
+</html>

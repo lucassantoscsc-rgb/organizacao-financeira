@@ -20,17 +20,26 @@ O app precisa estar em um link **https** para poder ser instalado. Os dois servi
 
 Depois de instalado, abre como app, em tela cheia, e funciona sem internet.
 
-## Código de acesso (só para quem comprou)
+## Código de acesso (um por cliente)
 
-O app pede um código na primeira abertura. O código é conferido no servidor da Vercel
-(arquivo `api/liberar.js`), então não aparece no código do app.
+Cada cliente recebe um código próprio que libera **um único aparelho**.
+O código é conferido no servidor da Vercel (`api/liberar.js`) e fica guardado num banco Redis (Upstash).
 
-- Os códigos válidos ficam na Vercel: **Project → Settings → Environment Variables**,
-  variável `ACCESS_CODES`, separados por vírgula. Ex.: `BRIO2026,CLIENTEVIP`.
-- Depois de mudar a variável, faça **Redeploy** (aba Deployments → ⋯ → Redeploy).
-- Para trocar o código de novas vendas, adicione o novo e remova o antigo. Quem já liberou continua liberado.
-- Para abrir o app sem código, troque `exigirCodigo: true` por `false` no começo do `app.js`.
-- Envie o código junto com o link na entrega da Cakto/Payt.
+**A cada venda na Cakto:**
+1. Abra `SEU-LINK/admin.html` e entre com a senha do painel.
+2. Digite o nome ou e-mail do cliente e clique em **Gerar código**.
+3. Clique em **Copiar mensagem para o cliente** e envie (WhatsApp ou e-mail).
+
+**Cliente trocou de celular:** no painel, ache o código e clique em **Liberar de novo**.
+**Excluir um código:** ele deixa de funcionar para novos aparelhos (quem já liberou continua usando).
+
+**Configuração na Vercel (uma vez só):**
+- **Storage → Upstash for Redis** ligado ao projeto (cria as variáveis `KV_REST_API_URL` e `KV_REST_API_TOKEN`).
+- Variável `ADMIN_SENHA`: a senha do painel (mínimo 6 caracteres).
+- Variável `ACCESS_CODES` (opcional): códigos fixos sem limite de aparelhos, separados por vírgula.
+- Depois de mudar variáveis, faça **Redeploy**.
+
+Para abrir o app sem código, troque `exigirCodigo: true` por `false` no começo do `app.js`.
 
 ## Personalizar
 

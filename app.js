@@ -59,6 +59,13 @@ function mes(y,m,criar){
   if (!S.meses[k] && criar) S.meses[k] = { entradas:[], gastos:[], contas:[], reservas:[] };
   return S.meses[k] || { entradas:[], gastos:[], contas:[], reservas:[] };
 }
+// Identificação aleatória deste aparelho (para cada código liberar um só celular).
+function idAparelho(){
+  let id; try { id = localStorage.getItem('orgfin:aparelho'); } catch(e){}
+  if (!id){ id = (crypto.randomUUID ? crypto.randomUUID() : Date.now()+'-'+Math.random().toString(36).slice(2));
+    try { localStorage.setItem('orgfin:aparelho', id); } catch(e){} }
+  return id;
+}
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 
 /* ---------- cálculos (mesma lógica da planilha) ---------- */
@@ -471,7 +478,7 @@ document.addEventListener('click', e=>{
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
     if (!c) return toast('Digite o seu código');
-    fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c}) })
+    fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c, aparelho:idAparelho()}) })
       .then(r => r.json().then(d => ({ok:r.ok, d})))
       .then(({ok,d}) => { if (ok && d.ok){ S.liberado=true; salvar(); render(); } else toast(d.erro || 'Código inválido'); })
       .catch(() => toast('Sem internet. Conecte-se para liberar o acesso.'));
