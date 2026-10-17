@@ -17,6 +17,8 @@ const CONFIG = {
   ]
 };
 
+// Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
+const APP_VERSAO = 15;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -657,7 +659,7 @@ const $ov = document.getElementById('overlay'), $sh = document.getElementById('s
 let form = null;
 function abrir(html){ $sh.innerHTML = '<div class="grab"></div>'+html; $ov.classList.add('open'); const i=$sh.querySelector('input.money'); if(i&&!i.value) setTimeout(()=>i.focus(),250); }
 function fechar(){ $ov.classList.remove('open'); form=null; }
-$ov.addEventListener('click', e=>{ if(e.target===$ov) fechar(); });
+$ov.addEventListener('click', e=>{ if(e.target===$ov){ if ($sh.querySelector('.novidades')){ S.versaoVista = APP_VERSAO; salvar(); } fechar(); } });
 
 const dataHoje = () => { const d=new Date(); return key(d.getFullYear(),d.getMonth())+'-'+String(d.getDate()).padStart(2,'0'); };
 const dataPadrao = () => (cur.y===hoje.getFullYear() && cur.m===hoje.getMonth()) ? dataHoje() : key(cur.y,cur.m)+'-01';
@@ -897,8 +899,9 @@ document.addEventListener('click', e=>{
     if (!v('oNome')) return toast('Como podemos te chamar?');
     S.perfil = { nome:v('oNome'), pronome:document.getElementById('oPron').value, metaNome:v('oMeta'),
       metaValor:parseValor(v('oMetaV')), reservaMeta:parseValor(v('oRes')), ok:true };
-    S.tourVisto = false; aba = 'resumo'; salvar(); render(); iniciarTour();
+    S.tourVisto = false; S.versaoVista = APP_VERSAO; aba = 'resumo'; salvar(); render(); iniciarTour();
   }
+  else if (a==='fecharNovidades'){ S.versaoVista = APP_VERSAO; salvar(); fechar(); }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
@@ -1052,6 +1055,44 @@ document.addEventListener('change', e=>{
 });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && form && e.target.tagName==='INPUT') salvarForm(); });
 
+/* ---------- atualizações ----------
+   versao.json diz qual é a versão publicada. Se for mais nova que este código:
+   - voltando ao app depois de 30 min minimizado, recarrega sozinho (se nada estiver aberto);
+   - senão, mostra uma faixa "Nova versão disponível".
+   Depois de atualizar, mostra uma vez a lista de novidades. */
+let escondidoEm = 0;
+function buscarVersao(){
+  return fetch('versao.json', { cache:'no-store' }).then(r => r.ok ? r.json() : null).catch(() => null);
+}
+function ocupado(){ return !!form || tour !== null || $ov.classList.contains('open') || document.activeElement?.tagName === 'INPUT'; }
+function checarVersao(podeRecarregar){
+  if (!navigator.onLine) return;
+  buscarVersao().then(v => {
+    if (!v || !(+v.versao > APP_VERSAO)) return;
+    if (podeRecarregar && !ocupado()) return location.reload();
+    if (document.getElementById('faixaAtualizar')) return;
+    const f = document.createElement('div');
+    f.id = 'faixaAtualizar'; f.className = 'upd'; f.setAttribute('role','status');
+    f.innerHTML = '<span>✨ Nova versão disponível</span><button data-upd="1">Atualizar</button>';
+    document.body.appendChild(f);
+  });
+}
+function mostrarNovidades(){
+  if (!S.liberado || !S.perfil.ok || tour !== null) return;
+  if ((S.versaoVista || 0) >= APP_VERSAO) return;
+  buscarVersao().then(v => {
+    if (!v || +v.versao !== APP_VERSAO || !(v.novidades||[]).length || ocupado()) return;
+    abrir(`<h2>✨ O que há de novo</h2><ul class="novidades">${v.novidades.map(n=>`<li>${esc(n)}</li>`).join('')}</ul>
+      <button class="btn pri" data-act="fecharNovidades">Entendi</button>`);
+  });
+}
+document.addEventListener('click', e => { if (e.target.closest('[data-upd]')) location.reload(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { escondidoEm = Date.now(); return; }
+  checarVersao(escondidoEm && Date.now() - escondidoEm > 30*60e3);
+});
+window.addEventListener('online', () => checarVersao(false));
+
 /* ---------- tutorial do primeiro acesso ----------
    Escurece a tela, destaca um elemento por vez e explica. Passa pelas abas sozinho. */
 const PASSOS_TOUR = [
@@ -1155,6 +1196,8 @@ function renderAcesso(){
 render();
 if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
 verificarAcesso();
+checarVersao(false);
+mostrarNovidades();
 window.addEventListener('online', verificarAcesso);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

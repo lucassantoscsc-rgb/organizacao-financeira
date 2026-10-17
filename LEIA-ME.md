@@ -48,7 +48,16 @@ Para abrir o app sem pedir acesso, troque `exigirCodigo: true` por `false` no co
 
 ## Publicar uma atualização
 
-Sempre que mudar algum arquivo, abra `sw.js` e aumente a versão (`financas-v1` → `financas-v2`) antes de publicar de novo. Assim os celulares baixam a versão nova.
+Antes de publicar, aumente a versão em **três lugares** (sempre o mesmo número):
+1. `app.js`: `const APP_VERSAO = 15;`
+2. `sw.js`: `const CACHE = 'financas-v15';`
+3. `versao.json`: `"versao": 15`, e escreva em `"novidades"` o que mudou (aparece para quem já usava o app).
+
+Como os clientes recebem:
+- Abriu o app com internet: já carrega a versão nova.
+- Voltou ao app depois de 30 min minimizado: recarrega sozinho (se não houver formulário aberto).
+- Usando o app quando a versão saiu: aparece a faixa "✨ Nova versão disponível · Atualizar".
+- Depois de atualizar, aparece uma vez "O que há de novo" com a lista de `novidades`. Cliente novo não vê.
 
 ## Onde ficam os dados
 
