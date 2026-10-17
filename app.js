@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 25;
+const APP_VERSAO = 26;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -42,6 +42,9 @@ function novoEstado(){
     perfil:{ nome:'', pronome:'Masculinos', metaNome:'', metaValor:0, reservaMeta:0, ok:false },
     carry:true, meses:{}, orcamentos:{} };
 }
+// Modo demonstração (/demo ou ?demo): dados de exemplo, nada é salvo e os dados reais do aparelho não são tocados.
+const DEMO = /\/demo\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('demo');
+const LINK_COMPRA = 'https://planilhadeorganizacaofinanceira.online';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
@@ -68,7 +71,7 @@ function aplicarTema(){
 }
 aplicarTema();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', aplicarTema);
-function salvar(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){ toast('Não foi possível salvar no aparelho'); } if (typeof agendarSyncNotif === 'function') agendarSyncNotif(); }
+function salvar(){ if (DEMO) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){ toast('Não foi possível salvar no aparelho'); } if (typeof agendarSyncNotif === 'function') agendarSyncNotif(); }
 
 const hoje = new Date();
 let cur = { y: hoje.getFullYear(), m: hoje.getMonth() };   // mês aberto
@@ -1025,7 +1028,7 @@ function blocoPrevisao(C){
 // No iPhone, quem usa pelo Safari e depois instala o app começa vazio (são armazenamentos separados).
 const noNavegadorIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
 function dicaTransferir(){
-  if (!noNavegadorIOS() || S.dicaTransfFechada || !primeiraChave()) return '';
+  if (DEMO || !noNavegadorIOS() || S.dicaTransfFechada || !primeiraChave()) return '';
   return `<div class="alert info backup"><span>📲</span><div><b>Vai usar pelo app na tela de início?</b><br>
     No iPhone, o app instalado não enxerga os dados daqui do Safari. Para levar tudo: toque em <b>Fazer backup</b> → <b>Salvar em Arquivos</b>. Depois abra o app instalado e toque em <b>Restaurar backup</b>.
     <div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="fecharDicaTransf">Fechar</button></div></div></div>`;
@@ -1040,7 +1043,7 @@ function precisaBackup(){
   return n >= 15 || diasDesde(S.ultimoBackup) >= 30;
 }
 function lembreteBackup(){
-  if (!precisaBackup()) return '';
+  if (DEMO || !precisaBackup()) return '';
   const quando = S.ultimoBackup ? `Seu último backup foi há ${diasDesde(S.ultimoBackup)} dia${diasDesde(S.ultimoBackup)===1?'':'s'}` : 'Você ainda não fez nenhum backup';
   return `<div class="alert info backup"><span>💾</span><div><b>Proteja seus dados</b><br>${quando} e tem ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} novo${S.novosDesdeBackup>1?'s':''}. Se trocar de celular ou limpar o navegador, eles se perdem.
     <div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="adiarBackup">Depois</button></div></div></div>`;
@@ -1693,6 +1696,7 @@ document.addEventListener('click', e=>{
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
   const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo]');
   if (!t) return;
+  if (DEMO && BLOQ_DEMO.has(t.dataset.act)) return toast('Na demonstração isso fica desligado. Compre para usar com seus dados 😉');
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
     const name = t.parentElement.dataset.chips;
     t.parentElement.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b===t));
@@ -2130,6 +2134,59 @@ function renderAcesso(){
 const parametros = new URLSearchParams(location.search);
 if (parametros.has('aba') || parametros.has('novo')) history.replaceState(null, '', location.pathname);
 if (parametros.get('aba') === 'contas') aba = 'contas';
+/* ---------- dados da demonstração ---------- */
+function dadosDemo(){
+  let semente = 20261;
+  const rnd = () => { semente = (semente * 16807) % 2147483647; return semente / 2147483647; };
+  const entre = (a, b) => Math.round((a + rnd()*(b-a)) * 100) / 100;
+  const D = novoEstado();
+  S = D;   // mes() escreve em S
+  Object.assign(D, { liberado:true, tourVisto:false, versaoVista:APP_VERSAO, carry:false,
+    perfil:{ nome:'visitante', pronome:'Neutros', metaNome:'', metaValor:0, reservaMeta:0, ok:true },
+    cofrinhos:[
+      { id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:15000, prazo:'' },
+      { id:'viagem', nome:'Viagem para a praia', emoji:'🏖️', alvo:4000, prazo:key(somaMeses(hoje.getFullYear(),hoje.getMonth(),5).y, somaMeses(hoje.getFullYear(),hoje.getMonth(),5).m) },
+      { id:'note', nome:'Notebook novo', emoji:'💻', alvo:5000, prazo:'' } ],
+    orcamentos:{ '🧺 Mercado':900, '🍗 Alimentação':600, '🎉 Lazer':300 } });
+  const hojeDia = hoje.getDate();
+  for (let off = -4; off <= 0; off++){
+    const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), off), k = key(o.y, o.m), M = mes(o.y, o.m, true);
+    const lim = off === 0 ? hojeDia : diasNoMes(o.y, o.m);
+    const dia = (d) => k + '-' + String(Math.min(d, diasNoMes(o.y,o.m))).padStart(2,'0');
+    const g = (cat, desc, valor, forma, d, extra) => { if (d <= lim) M.gastos.push({ id:uid(), cat, desc, valor, forma, data:dia(d), essencial:ESSENCIAIS.includes(cat), parcelas:1, ...(extra||{}) }); };
+    M.entradas.push({ id:uid(), nome:'Salário', valor:5400, fixa:true, data:dia(5) });
+    if (off === -2 || off === -1) M.entradas.push({ id:uid(), nome:'Freela', valor:entre(500,900), data:dia(18) });
+    [3,11,24].forEach(d => g('🧺 Mercado','Supermercado', entre(160,320), rnd()<.5?'Débito':'Pix / Dinheiro', d));
+    [7,21].forEach(d => g('🧺 Mercado','Feira', entre(40,75), 'Pix / Dinheiro', d));
+    [2,9,14,19,27].forEach(d => g('🍗 Alimentação','iFood', entre(35,72), 'Crédito', d));
+    [4,12,22].forEach(d => g('🍗 Alimentação','Padaria', entre(14,28), 'Pix / Dinheiro', d));
+    g('🍗 Alimentação','Restaurante', entre(90,150), 'Crédito', 16);
+    [6,20].forEach(d => g('⛽ Gasolina','Posto', entre(150,210), 'Débito', d));
+    [8,15,26].forEach(d => g('🚗 Transporte','Uber', entre(16,38), 'Crédito', d));
+    g('📱 Assinaturas','Netflix', off >= -1 ? 59.9 : 55.9, 'Crédito', 8);
+    g('📱 Assinaturas','Spotify', 21.9, 'Crédito', 12);
+    g('💊 Saúde','Academia', 99.9, 'Débito', 3);
+    g('💊 Saúde','Farmácia', entre(35,90), 'Pix / Dinheiro', 13);
+    g('🎉 Lazer', rnd()<.5?'Cinema':'Bar com amigos', entre(60,160), 'Crédito', 17);
+    if (rnd() < .6) g('👕 Vestuário','Renner', entre(120,260), 'Crédito', 23);
+    g('💄 Beleza','Salão', entre(65,110), 'Pix / Dinheiro', 10);
+    g('📦 Compras Online','Shopee', entre(45,140), 'Crédito', 25);
+    if (off === -2) g('📦 Compras Online','Celular novo', 1800, 'Crédito', 14, { parcelas:10, essencial:false });
+    [['Aluguel',1400,10],['Energia',entre(160,215),15],['Internet',99.9,20],['Água',entre(70,95),25]].forEach(([nome,v,venc]) => {
+      const pago = off < 0 || venc < hojeDia;
+      M.contas.push({ id:uid(), nome, planejado:Math.round(v), valor:pago?v:0, pago, data:pago?dia(venc):'', venc });
+    });
+    if (6 <= lim){ M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'reserva', valor:300, nome:'Nubank', data:dia(6) });
+      M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'viagem', valor:250, nome:'', data:dia(6) }); }
+    if (off === -1) M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'note', valor:400, nome:'', data:dia(28) });
+    M.auto = true;
+  }
+  for (let i = 0; i < 9; i++){ const d = new Date(); d.setDate(d.getDate() - i); D.diasAtivos = D.diasAtivos || []; D.diasAtivos.unshift(key(d.getFullYear(),d.getMonth()) + '-' + String(d.getDate()).padStart(2,'0')); }
+  return D;
+}
+// Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
+const BLOQ_DEMO = new Set(['exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
   if (notifLigada() && S.notifSync !== dataHoje()){ S.notifSync = dataHoje(); salvar(); sincronizarNotif(); }
@@ -2137,9 +2194,17 @@ function iniciarApp(){
   mostrarNovidades();
   setTimeout(checarConquistas, 1200);
 }
+if (DEMO){
+  const salvo = S;   // mantém só preferências visuais do aparelho
+  S = dadosDemo(); S.tema = salvo.tema; S = Object.assign(S, { liberado:true }); migrar();
+  document.body.classList.add('demo');
+  const barra = document.createElement('div'); barra.id = 'demoBar';
+  barra.innerHTML = `<span>👀 <b>Demonstração</b> com dados de exemplo</span><a href="${LINK_COMPRA}" target="_blank" rel="noopener">Quero o meu</a>`;
+  document.body.appendChild(barra);
+}
 render();
 if (S.liberado && S.perfil.ok && temSenha()){ aoDestravar = iniciarApp; travar(); } else iniciarApp();
-verificarAcesso();
+if (!DEMO) verificarAcesso();
 checarVersao(false);
 window.addEventListener('online', verificarAcesso);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });

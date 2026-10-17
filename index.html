@@ -471,6 +471,13 @@ body.privado #app,body.privado .overlay{filter:blur(18px)}
 .imp-lista select{font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--field);color:var(--ink);padding:2px 4px;max-width:150px}
 .imp-lista .t2{display:flex;flex-wrap:wrap;align-items:center;gap:4px}
 
+/* demonstração */
+#demoBar{position:fixed;left:0;right:0;top:0;z-index:90;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:calc(var(--safe-t) + 8px) 14px 8px;background:#f59e0b;color:#3b2503;font-size:13.5px}
+#demoBar a{background:#3b2503;color:#fff;font-weight:700;border-radius:10px;padding:7px 12px;text-decoration:none;white-space:nowrap}
+body.demo .top{padding-top:calc(var(--safe-t) + 62px)}
+body.demo .olho{top:calc(var(--safe-t) + 58px)}
+
 /* busca */
 .busca{position:relative;margin-bottom:12px}
 .busca input{width:100%;padding:12px 40px 12px 40px;border:1.5px solid var(--line);border-radius:14px;background:var(--surface);font-size:16px;outline:none;color:var(--ink)}

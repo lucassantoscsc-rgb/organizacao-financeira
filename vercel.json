@@ -1,4 +1,7 @@
 {
+  "rewrites": [
+    { "source": "/demo", "destination": "/index.html" }
+  ],
   "crons": [
     { "path": "/api/lembretes", "schedule": "0 23 * * *" }
   ]
