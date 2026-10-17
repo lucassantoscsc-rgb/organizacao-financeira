@@ -1,7 +1,7 @@
 {
-  "versao": 20,
+  "versao": 21,
   "novidades": [
-    "👁️ Esconder valores: toque no olho no topo e todos os valores ficam escondidos.",
-    "🔒 Bloqueio com senha (e Face ID/digital, onde o aparelho permitir). Ative em Ajustes → Privacidade."
+    "🔁 Detector de assinaturas: o app encontra os gastos que se repetem todo mês (Netflix, Spotify, academia…) e mostra quanto custam por mês e por ano.",
+    "📈 Avisa quando uma assinatura fica mais cara."
   ]
 }

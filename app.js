@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 20;
+const APP_VERSAO = 21;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -786,6 +786,7 @@ function telaResumo(){
 
   html += cardCategorias(C);
   html += cardOrcamentos(C);
+  html += cardAssinaturas();
   html += cardEvolucao();
 
   html += cardCofrinhos(true);
@@ -878,6 +879,67 @@ function cardCategorias(C){
 }
 
 // Medidores de orçamento por categoria.
+/* ---------- detector de assinaturas ----------
+   Gastos que se repetem todo mês com valor parecido (últimos 6 meses), ou serviços conhecidos pelo nome. */
+const PALAVRAS_ASSIN = [...PALAVRAS_CAT.find(([c])=>c==='📱 Assinaturas')[1], 'academia','smart fit','smartfit','gympass','wellhub','totalpass','seguro','plano','apple music','prime','ifood clube','clube','mensalidade','mensal','dropbox','google one','canva','microsoft','office','paramount','star','crunchyroll','tidal','kindle','audible'];
+function detectarAssinaturas(){
+  const kh = chaveHoje(), ignoradas = new Set(S.assinIgnoradas || []);
+  const ks = []; for (let i=5;i>=0;i--){ const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), -i); ks.push(key(o.y,o.m)); }
+  const grupos = {};
+  ks.forEach(k => (S.meses[k] ? S.meses[k].gastos : []).forEach(g => {
+    if (ehParcelado(g)) return;
+    const nome = (g.desc||'').trim();
+    if (!nome && g.cat !== '📱 Assinaturas') return;
+    const chave = normTxt(nome) || 'cat:' + g.cat;
+    (grupos[chave] = grupos[chave] || { chave, nome: nome || nomeCat(g.cat), cat:g.cat, oc:[] }).oc.push({ k, v:+g.valor, data:g.data || k+'-01' });
+  }));
+  const kAnt = key(prevYM(hoje.getFullYear(), hoje.getMonth()).y, prevYM(hoje.getFullYear(), hoje.getMonth()).m);
+  const lista = [];
+  Object.values(grupos).forEach(gr => {
+    if (ignoradas.has(gr.chave)) return;
+    const meses = new Set(gr.oc.map(o=>o.k)), porMes = gr.oc.length / meses.size;
+    const vals = gr.oc.map(o=>o.v).sort((a,b)=>a-b), med = vals[Math.floor(vals.length/2)];
+    const variacao = med ? Math.max(...vals.map(v=>Math.abs(v-med)))/med : 1;
+    const conhecida = gr.cat === '📱 Assinaturas' || PALAVRAS_ASSIN.some(w => temPalavra(gr.chave, w));
+    // Assinatura cobra sempre o mesmo valor: o que não é conhecido precisa de 3+ meses quase iguais.
+    // Mercado, gasolina e alimentação nunca entram só por repetição.
+    const recorrente = !['🧺 Mercado','⛽ Gasolina','🍗 Alimentação'].includes(gr.cat) && meses.size >= 3 && porMes <= 1.34 && variacao <= 0.05;
+    if (!recorrente && !(conhecida && porMes <= 1.5 && variacao <= 0.35)) return;
+    gr.oc.sort((a,b)=>a.data.localeCompare(b.data));
+    const ultimo = gr.oc[gr.oc.length-1];
+    const anterior = [...gr.oc].reverse().find(o => o.k < ultimo.k);
+    lista.push({ ...gr, valor: ultimo.v, ultimo, desde: gr.oc[0].k, meses: meses.size,
+      ativa: ultimo.k >= kAnt, esteMes: meses.has(kh),
+      aumento: anterior && ultimo.v > anterior.v * 1.02 ? ultimo.v - anterior.v : 0 });
+  });
+  return lista.sort((a,b) => b.valor - a.valor);
+}
+function cardAssinaturas(){
+  if (key(cur.y,cur.m) !== chaveHoje()) return '';
+  const lista = detectarAssinaturas().filter(a=>a.ativa);
+  if (!lista.length) return '';
+  const mensal = soma(lista, a=>a.valor), aum = lista.filter(a=>a.aumento);
+  return `<section class="card" id="cardAssin"><h3>🔁 Assinaturas <small>${lista.length} encontrada${lista.length>1?'s':''}</small></h3>
+    <div class="assin-tot"><div><b class="num">${brl(mensal)}</b><span>por mês</span></div><div><b class="num">${brl(mensal*12)}</b><span>por ano</span></div></div>
+    ${aum.length ? `<div class="alert crit" style="margin:0 0 10px"><span>📈</span><div>${aum.map(a=>`<b>${esc(a.nome)}</b> ficou ${brl(a.aumento)} mais cara`).join(' · ')}</div></div>` : ''}
+    <div class="assin-mini">${lista.slice(0,4).map(a=>`<span>${emojiCat(a.cat)} ${esc(a.nome)} <b class="num">${brl(a.valor)}</b></span>`).join('')}</div>
+    <button class="btn sec" data-act="assinaturas">Ver detalhes</button></section>`;
+}
+function abrirAssinaturas(){
+  const lista = detectarAssinaturas();
+  const ativas = lista.filter(a=>a.ativa), mensal = soma(ativas, a=>a.valor);
+  const mesTxt = (k) => { const o = ymDe(k); return `${MES_CURTO[o.m]}/${String(o.y).slice(2)}`; };
+  abrir(`<h2>🔁 Assinaturas e gastos fixos</h2>
+    <p class="note" style="margin:-6px 0 12px">Gastos que se repetem todo mês. Somando os ativos: <b>${brl(mensal)}/mês</b>, ou <b>${brl(mensal*12)} por ano</b>.</p>
+    <div class="list flat">${lista.map(a=>`<div class="item"><div class="ic">${emojiCat(a.cat)}</div>
+      <div class="tx"><div class="t1">${esc(a.nome)}</div><div class="t2">${a.meses>1?`${a.meses} meses desde ${mesTxt(a.desde)}`:'1 vez'} · último ${fmtData(a.ultimo.data)}
+        ${a.aumento?`<span class="tag cr">+${brl(a.aumento)}</span>`:''}${!a.esteMes && a.ativa?'<span class="tag warn">ainda não lançado este mês</span>':''}${!a.ativa?'<span class="tag">parou?</span>':''}</div>
+        <button class="assin-ign" data-act="ignorarAssin" data-chave="${esc(a.chave)}">Não é assinatura</button></div>
+      <div class="val num">${brl(a.valor)}</div></div>`).join('') || '<div class="empty">Nenhuma assinatura encontrada.</div>'}</div>
+    <p class="note" style="margin-top:12px">💡 Cancelar o que você não usa faz diferença: cada R$ 30 por mês são R$ 360 por ano.</p>
+    ${(S.assinIgnoradas||[]).length ? `<button class="btn sec" data-act="restaurarAssin" style="margin-top:10px">Mostrar ${S.assinIgnoradas.length} item(ns) escondido(s)</button>` : ''}`);
+}
+
 function cardOrcamentos(C){
   const lst = Object.entries(S.orcamentos).filter(([,l])=>l>0);
   if (!lst.length) return `<section class="card" id="cardOrcamentos"><h3>Orçamentos</h3><div class="note" style="margin:0 0 12px">Defina um limite por categoria e o app avisa antes de você estourar.</div><button class="btn sec" data-act="orcamentos">Definir orçamentos</button></section>`;
@@ -1466,6 +1528,9 @@ document.addEventListener('click', e=>{
     if (S.seguranca.bio){ delete S.seguranca.bio; salvar(); render(); }
     else bioCadastrar().then(()=>{ toast('Face ID/digital ativado ✓'); render(); }).catch(()=>toast('Não foi possível ativar neste aparelho.'));
   }
+  else if (a==='assinaturas'){ abrirAssinaturas(); }
+  else if (a==='ignorarAssin'){ S.assinIgnoradas = [...new Set([...(S.assinIgnoradas||[]), t.dataset.chave])]; salvar(); render(); abrirAssinaturas(); toast('Removido da lista'); }
+  else if (a==='restaurarAssin'){ S.assinIgnoradas = []; salvar(); render(); abrirAssinaturas(); }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
