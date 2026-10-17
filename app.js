@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 26;
+const APP_VERSAO = 27;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -1008,6 +1008,88 @@ function telaResumo(){
 const stat = (k,cor,v,d) => `<div class="stat"><div class="k"><i style="background:${cor}"></i>${k}</div><div class="v num">${brl(v)}</div>${d}</div>`;
 
 // Previsão do mês atual: quanto dá para gastar por dia e onde o mês vai terminar.
+/* ---------- "Posso comprar?" ----------
+   Compara a compra com o que costuma sobrar por mês (média dos últimos meses completos). */
+function fimDoMesPrevisto(){
+  const C = calc(hoje.getFullYear(), hoje.getMonth()), D = diasNoMes(hoje.getFullYear(), hoje.getMonth()), d = hoje.getDate(), rest = D - d + 1;
+  return C.restante - C.contasPend - (C.gastosVista / d) * (rest - 1);
+}
+function baseSimulacao(){
+  const usados = [];
+  for (let i = 1; i <= 6 && usados.length < 3; i++){ const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), -i); if (temDados(S.meses[key(o.y,o.m)])) usados.push(o); }
+  const parcelasDe = (o) => soma(parcelasDoMes(o.y,o.m), x=>x.valor);
+  if (!usados.length){   // sem histórico: projeta o mês atual
+    const C = calc(hoje.getFullYear(), hoje.getMonth()), f = diasNoMes(hoje.getFullYear(), hoje.getMonth()) / hoje.getDate();
+    return { renda:C.entradasLanc, folga:C.entradasLanc - C.consumo*f - C.reservas, parcelasMedia:parcelasDe({ y:hoje.getFullYear(), m:hoje.getMonth() }), meses:0 };
+  }
+  const cs = usados.map(o => calc(o.y,o.m)), n = cs.length;
+  const renda = soma(cs, c=>c.entradasLanc)/n, gasto = soma(cs, c=>c.consumo)/n, guardado = soma(cs, c=>Math.max(c.reservas,0))/n;
+  return { renda, folga: renda - gasto - guardado, parcelasMedia: soma(usados, parcelasDe)/n, meses:n };
+}
+function simularCompra(valor, credito, n){
+  const b = baseSimulacao(), linhas = [];
+  let pior = Infinity;
+  if (!credito){
+    const fim = fimDoMesPrevisto(), depois = fim - valor;
+    linhas.push({ k:chaveHoje(), antes:fim, depois }); pior = depois;
+  } else {
+    const parcela = valor / n;
+    for (let i = 1; i <= n; i++){
+      const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), i - 1);   // a compra entra no crédito deste mês e vira fatura no seguinte
+      const extra = Math.max(0, soma(parcelasDoMes(o.y,o.m), x=>x.valor) - b.parcelasMedia);   // parcelas já assumidas além do normal
+      const pg = somaMeses(o.y, o.m, 1), antes = b.folga - extra;
+      linhas.push({ k:key(pg.y,pg.m), antes, depois: antes - parcela });
+      pior = Math.min(pior, antes - parcela);
+    }
+  }
+  const margem = Math.max(b.renda * 0.05, 100);
+  const status = pior < 0 ? 'nao' : pior < margem ? 'apertado' : 'ok';
+  // sugestões
+  let parcelasQueCabem = null;
+  if (status !== 'ok' && b.folga > 0) for (let k = (credito ? n+1 : 2); k <= 24; k++){ if (valor/k <= b.folga * 0.6){ parcelasQueCabem = k; break; } }
+  const porMes = b.folga > 0 ? Math.max(50, Math.round(b.folga * 0.5 / 10) * 10) : 0;
+  const mesesJuntando = porMes ? Math.ceil(valor / porMes) : 0;
+  const diasTrabalho = b.renda > 0 ? valor / (b.renda / 22) : 0;
+  return { b, linhas, status, pior, parcelasQueCabem, porMes, mesesJuntando, diasTrabalho };
+}
+function abrirPossoComprar(){
+  form = { tipo:'simulacao', v:{ credito:false } };
+  abrir(`<h2>🤔 Posso comprar?</h2>
+    <div class="f"><input class="money num big" id="sValor" inputmode="decimal" placeholder="R$ 0,00" aria-label="Preço"></div>
+    <div class="f"><input id="sNome" placeholder="O que é? (opcional) Ex.: Tênis, celular…" autocomplete="off"></div>
+    <div class="f"><label>Como você pagaria?</label><div class="chips" data-chips="pag"><button type="button" class="on" data-v="vista">À vista (Pix/débito)</button><button type="button" data-v="credito">No crédito</button></div></div>
+    <div class="f" id="sBoxParc" hidden><label>Parcelas</label><select id="sParc">${Array.from({length:24},(_,i)=>i+1).map(n=>`<option value="${n}">${n===1?'1x (à vista no cartão)':n+'x'}</option>`).join('')}</select></div>
+    <div id="sResultado" aria-live="polite"><p class="note">Digite o preço para ver a simulação.</p></div>`);
+}
+function atualizarSimulacao(){
+  const box = document.getElementById('sResultado'); if (!box) return;
+  const valor = parseValor(document.getElementById('sValor').value);
+  if (!valor) return box.innerHTML = '<p class="note">Digite o preço para ver a simulação.</p>';
+  const credito = form.v.credito, n = credito ? +document.getElementById('sParc').value : 1;
+  const r = simularCompra(valor, credito, n), mesTxt = (k) => { const o = ymDe(k); return MES_CURTO[o.m] + '/' + String(o.y).slice(2); };
+  const cab = { ok:['✅','Cabe com folga','sim'], apertado:['⚠️','Cabe, mas fica apertado','talvez'], nao:['❌','Não cabe no seu orçamento agora','nao'] }[r.status];
+  let h = `<div class="sim-veredito ${cab[2]}"><span>${cab[0]}</span><b>${cab[1]}</b></div>`;
+  if (!credito){
+    const l = r.linhas[0];
+    h += `<p class="sim-txt">Este mês você deve terminar com <b>${brl(l.antes)}</b>. Comprando à vista, ficaria com <b class="${l.depois<0?'neg':''}">${brl(l.depois)}</b>.</p>`;
+  } else {
+    h += `<p class="sim-txt">${n}x de <b>${brl(valor/n)}</b>. Normalmente sobram <b>${brl(r.b.folga)}</b> por mês. Veja como ficaria:</p>
+      <div class="sim-meses">${r.linhas.slice(0,6).map(l=>`<div><span>${mesTxt(l.k)}</span><span class="num">${brl(l.antes)} → <b class="${l.depois<0?'neg':l.depois<r.b.renda*0.05?'warn':''}">${brl(l.depois)}</b></span></div>`).join('')}
+      ${r.linhas.length>6?`<div class="sim-mais">… e mais ${r.linhas.length-6} meses</div>`:''}</div>`;
+  }
+  if (r.status !== 'ok'){
+    const sug = [];
+    if (!credito && r.b.folga - valor > Math.max(r.b.renda*0.05, 100)){ const q = somaMeses(hoje.getFullYear(), hoje.getMonth(), 1); sug.push(`Esperando até <b>${MESES[q.m].toLowerCase()}</b>, cabe: normalmente sobram ${brl(r.b.folga)} por mês.`); }
+    if (r.parcelasQueCabem) sug.push(`Parcelando em <b>${r.parcelasQueCabem}x</b> (${brl(valor/r.parcelasQueCabem)}), caberia melhor — se for sem juros.`);
+    if (r.mesesJuntando){ const q = somaMeses(hoje.getFullYear(), hoje.getMonth(), r.mesesJuntando); sug.push(`Guardando <b>${brl(r.porMes)}/mês</b> num cofrinho, você compra à vista em <b>${MESES[q.m].toLowerCase()}</b>.`); }
+    if (sug.length) h += `<div class="sim-sug">💡 ${sug.join('<br>💡 ')}</div>`;
+  }
+  if (r.diasTrabalho >= 0.5) h += `<p class="note">⏱️ Isso equivale a ${r.diasTrabalho < 1.5 ? 'cerca de 1 dia' : '~' + Math.round(r.diasTrabalho) + ' dias'} do seu trabalho.</p>`;
+  if (!r.b.meses) h += `<p class="note">Estimativa com base só neste mês. Fica mais precisa com mais meses de uso.</p>`;
+  h += `<div class="row2" style="margin-top:12px"><button class="btn pri" data-act="simLancar">Lançar compra</button>${r.status!=='ok' && r.porMes ? '<button class="btn sec" data-act="simCofrinho">Criar cofrinho</button>' : '<button class="btn sec" data-act="simFechar">Fechar</button>'}</div>`;
+  box.innerHTML = h;
+}
+
 function blocoPrevisao(C){
   if (key(cur.y,cur.m) !== chaveHoje()) return '';
   const D = diasNoMes(cur.y,cur.m), d = hoje.getDate(), rest = D - d + 1;
@@ -1020,6 +1102,7 @@ function blocoPrevisao(C){
     <div><span>No ritmo atual</span><b class="num ${fim<0 && !S.ocultar?'neg':''}">${brl(fim)}</b><small>no fim do mês (${brl0(ritmo)}/dia)</small></div>
   </div>`;
   if (C.contasPend > 0) h += `<div class="eq">Já descontando ${brl(C.contasPend)} de contas a pagar.</div>`;
+  h += `<button class="btn sec mini-largo" data-act="possoComprar">🤔 Posso comprar?</button>`;
   const fut = comprometidoFuturo();
   if (fut > 0) h += `<div class="eq">💳 ${brl(fut)} em parcelas nos próximos meses.</div>`;
   return h;
@@ -1279,8 +1362,8 @@ function abrirCofrinho(id){
     <div class="list flat">${movs.slice(0,30).map(({mk,r})=>`<button class="item" data-edit="reservas" data-id="${r.id}" data-mk="${mk}"><div class="tx"><div class="t1">${r.valor<0?'Retirada':esc(r.nome||'Guardado')}</div><div class="t2">${r.data?fmtData(r.data)+'/'+mk.slice(0,4):MESES[ymDe(mk).m]}</div></div><div class="val num ${r.valor<0?'down':'up'}">${r.valor<0?'−':'+'}${brl(Math.abs(r.valor))}</div></button>`).join('') || '<div class="empty">Nada guardado ainda.</div>'}</div>
     <button class="btn sec" data-act="editarCof" data-cof-id="${id}" style="margin-top:14px">Editar cofrinho</button>`);
 }
-function editarCofrinho(id){
-  const c = id ? cofPorId(id) : { nome:'', emoji:'🎯', alvo:0, prazo:'' };
+function editarCofrinho(id, sugestao){
+  const c = id ? cofPorId(id) : { nome:'', emoji:'🎯', alvo:0, prazo:'', ...(sugestao||{}) };
   form = { tipo:'cofrinho', id, v:{ emoji:c.emoji } };
   abrir(`<h2>${id?'Editar':'Novo'} cofrinho</h2>
     <div class="f"><label>Nome</label><input id="cNome" placeholder="Ex.: Viagem, Carro, Reserva" value="${esc(c.nome)}"></div>
@@ -1467,7 +1550,8 @@ function telaContas(){
 
 function telaMetas(){
   const C = calc(cur.y,cur.m), p = S.perfil;
-  return `${cardCofrinhos(false)}
+  return `<button class="retro-card simular" data-act="possoComprar"><span class="rc-e">🤔</span><span><b>Posso comprar?</b><small>Simule uma compra antes de gastar</small></span><span class="rc-seta">›</span></button>
+  ${cardCofrinhos(false)}
   ${cardOrcamentos(C)}
   ${cardConquistas()}
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
@@ -1701,6 +1785,7 @@ document.addEventListener('click', e=>{
     const name = t.parentElement.dataset.chips;
     t.parentElement.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b===t));
     form.v[name] = name==='essencial' ? t.dataset.v==='Sim' : t.dataset.v;
+    if (name==='pag'){ form.v.credito = t.dataset.v==='credito'; document.getElementById('sBoxParc').hidden = !form.v.credito; atualizarSimulacao(); return; }
     if (name==='forma'){ const bp = document.getElementById('boxParc'); if (bp) bp.hidden = form.v.forma!=='Crédito'; if (form.v.forma==='Crédito') toast('Crédito: entra na fatura do mês seguinte'); }
     return;
   }
@@ -1818,6 +1903,19 @@ document.addEventListener('click', e=>{
   else if (a==='confirmarImp'){ confirmarImportacao(); }
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
+  else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='simFechar'){ fechar(); }
+  else if (a==='simLancar'){
+    const valor = parseValor(document.getElementById('sValor').value), nome = document.getElementById('sNome').value.trim(), credito = form.v.credito, n = credito ? +document.getElementById('sParc').value : 1;
+    abrirForm('gastos'); document.getElementById('fValor').value = moneyVal(valor); if (nome) document.getElementById('fDesc').value = nome;
+    if (nome){ const c = categorizar(nome); if (c.cat) selecionarCat(c.cat); }
+    if (credito){ form.v.forma = 'Crédito'; $sh.querySelectorAll('[data-chips="forma"] button').forEach(b=>b.classList.toggle('on', b.dataset.v==='Crédito')); document.getElementById('boxParc').hidden = false; document.getElementById('fParc').value = String(n); infoParcelas(); }
+  }
+  else if (a==='simCofrinho'){
+    const valor = parseValor(document.getElementById('sValor').value), nome = document.getElementById('sNome').value.trim() || 'Minha compra';
+    const r = simularCompra(valor, form.v.credito, 1), q = somaMeses(hoje.getFullYear(), hoje.getMonth(), r.mesesJuntando);
+    editarCofrinho(null, { nome, emoji:'🎯', alvo:valor, prazo:key(q.y,q.m) });
+  }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
@@ -1967,6 +2065,7 @@ document.addEventListener('input', e=>{
 document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
+  if (e.target.id==='sValor') atualizarSimulacao();
   if (e.target.id==='fBusca'){
     busca = e.target.value;
     memo = {}; memoParc = null;
@@ -1981,6 +2080,7 @@ document.addEventListener('change', e=>{
     const n = imp.itens.filter(y=>y.sel).length; $sh.querySelector('[data-act=confirmarImp]').textContent = `Importar ${n} lançamento${n===1?'':'s'}`; return; }
   if (e.target.dataset.impcat){ imp.itens[+e.target.dataset.impcat].cat = e.target.value; return; }
   if (e.target.id==='fParc') return infoParcelas();
+  if (e.target.id==='sParc') return atualizarSimulacao();
   if (e.target.id!=='fileImp' || !e.target.files[0]) return;
   const r = new FileReader();
   r.onload = () => { try {
@@ -1990,7 +2090,7 @@ document.addEventListener('change', e=>{
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && e.target.tagName==='INPUT') salvarForm(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && form.tipo!=='simulacao' && e.target.tagName==='INPUT') salvarForm(); });
 
 /* ---------- atualizações ----------
    versao.json diz qual é a versão publicada. Se for mais nova que este código:
@@ -2066,6 +2166,7 @@ function mostrarPasso(rolar = true){
   requestAnimationFrame(() => desenharTour(el, p));
 }
 function desenharTour(el, p){
+  if (tour === null) return;   // o tutorial pode ter sido fechado antes deste quadro ser desenhado
   let ov = document.getElementById('tour');
   if (!ov){ ov = document.createElement('div'); ov.id = 'tour'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); document.body.appendChild(ov); }
   const r = el ? el.getBoundingClientRect() : null, pad = 6;
