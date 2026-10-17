@@ -302,6 +302,19 @@ details.mais[open] summary::before{content:"− "}
 
 .btn.mini{width:auto;padding:8px 12px;font-size:13px;border-radius:10px;flex:none}
 
+/* tutorial */
+#tour{position:fixed;inset:0;z-index:100}
+#tour .t-dim{position:absolute;inset:0;background:rgba(4,14,13,.62)}
+#tour .t-spot{position:absolute;border-radius:16px;box-shadow:0 0 0 9999px rgba(4,14,13,.62);outline:2px solid var(--mint);outline-offset:0;transition:all .25s ease;pointer-events:none}
+#tour .t-box{position:absolute;left:16px;right:16px;max-width:380px;margin:0 auto;background:var(--surface);color:var(--ink);border-radius:18px;padding:16px 18px;box-shadow:0 12px 32px rgba(0,0,0,.3);animation:fade .2s}
+#tour .t-passo{font-size:12px;font-weight:700;color:var(--teal);letter-spacing:.02em}
+#tour h4{margin:4px 0 6px;font-size:17px;letter-spacing:-.01em}
+#tour p{margin:0;font-size:14.5px;color:var(--muted);line-height:1.45}
+#tour p b{color:var(--ink)}
+#tour .t-acts{display:flex;gap:8px;align-items:center;margin-top:14px}
+#tour .pular{margin-right:auto;color:var(--muted);font-size:14px;font-weight:600;padding:8px 2px}
+#tour .btn{width:auto;padding:10px 16px;font-size:14px;margin:0}
+
 /* busca */
 .busca{position:relative;margin-bottom:12px}
 .busca input{width:100%;padding:12px 40px 12px 40px;border:1.5px solid var(--line);border-radius:14px;background:var(--surface);font-size:16px;outline:none;color:var(--ink)}

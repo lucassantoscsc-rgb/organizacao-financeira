@@ -361,7 +361,7 @@ function alertasOrcamento(C){
 // Gráfico: onde o dinheiro foi (barras horizontais ordenadas, um toque abre o detalhe).
 function cardCategorias(C){
   const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-  let h = `<section class="card"><h3>Onde você gastou <small>${brl(C.consumo)}</small></h3>`;
+  let h = `<section class="card" id="cardCategorias"><h3>Onde você gastou <small>${brl(C.consumo)}</small></h3>`;
   if (!cats.length) return h + `<div class="note">Seus gastos por categoria aparecem aqui.</div></section>`;
   const max = cats[0][1];
   h += `<div class="hbars" role="list">`;
@@ -380,9 +380,9 @@ function cardCategorias(C){
 // Medidores de orçamento por categoria.
 function cardOrcamentos(C){
   const lst = Object.entries(S.orcamentos).filter(([,l])=>l>0);
-  if (!lst.length) return `<section class="card"><h3>Orçamentos</h3><div class="note" style="margin:0 0 12px">Defina um limite por categoria e o app avisa antes de você estourar.</div><button class="btn sec" data-act="orcamentos">Definir orçamentos</button></section>`;
+  if (!lst.length) return `<section class="card" id="cardOrcamentos"><h3>Orçamentos</h3><div class="note" style="margin:0 0 12px">Defina um limite por categoria e o app avisa antes de você estourar.</div><button class="btn sec" data-act="orcamentos">Definir orçamentos</button></section>`;
   const tot = soma(lst, x=>x[1]), gasto = soma(lst, ([c])=>C.cats[c]||0);
-  let h = `<section class="card"><h3>Orçamentos <small>${brl(gasto)} de ${brl(tot)}</small></h3>`;
+  let h = `<section class="card" id="cardOrcamentos"><h3>Orçamentos <small>${brl(gasto)} de ${brl(tot)}</small></h3>`;
   lst.sort((a,b)=>((C.cats[b[0]]||0)/b[1])-((C.cats[a[0]]||0)/a[1])).forEach(([c,l])=>{
     const v = C.cats[c]||0, pct = v/l*100;
     const st = pct>100 ? 'crit' : pct>=80 ? 'warn' : '';
@@ -581,7 +581,7 @@ function telaContas(){
 
 function telaMetas(){
   const C = calc(cur.y,cur.m), p = S.perfil;
-  return `<section class="card"><h3>Seu progresso</h3>${blocoMetas(C)}</section>
+  return `<section class="card" id="cardMetas"><h3>Seu progresso</h3>${blocoMetas(C)}</section>
   ${cardOrcamentos(C)}
   <section class="card"><h3>Editar metas</h3>
     <div class="f"><label>Minha meta é</label><input id="mNome" value="${esc(p.metaNome)}" placeholder="Ex.: Carro, Viagem, Casa"></div>
@@ -634,7 +634,7 @@ function telaAjustes(){
     <div class="switch"><span>Levar o que sobrou para o mês seguinte</span><button class="tg ${S.carry?'on':''}" data-act="carry" aria-label="Alternar"></button></div>
     <p class="note">Ligado: o “restante para gastar” de um mês entra como entrada no próximo.</p></section>
   ${instalado?'':cardInstalar()}
-  <section class="card"><h3>Backup dos dados</h3>
+  <section class="card" id="cardBackup"><h3>Backup dos dados</h3>
     <p class="note" style="margin:0 0 12px">Seus dados ficam só neste aparelho. Faça backup antes de trocar de celular ou limpar o navegador. Guarde o arquivo no Google Drive, iCloud, WhatsApp ou e-mail.</p>
     <p class="note" style="margin:0 0 12px">Último backup: <b>${S.ultimoBackup ? new Date(S.ultimoBackup).toLocaleDateString('pt-BR') + ` (${diasDesde(S.ultimoBackup)===0?'hoje':'há '+diasDesde(S.ultimoBackup)+' dias'})` : 'nunca'}</b>${S.novosDesdeBackup?` · ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} desde então`:''}</p>
     <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
@@ -648,6 +648,7 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
     ${S.conta ? '<button class="btn sec" data-act="aparelhos">📱 Aparelhos conectados</button>' : '<p class="note" style="margin:0 0 12px">Para ver e gerenciar seus aparelhos, saia e entre de novo com seu e-mail (seus dados ficam guardados).</p>'}
     <button class="btn sec" data-act="sair">Sair da conta</button></section>
+  <button class="btn sec" data-act="verTour">🎓 Ver tutorial de novo</button>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
 
@@ -896,8 +897,9 @@ document.addEventListener('click', e=>{
     if (!v('oNome')) return toast('Como podemos te chamar?');
     S.perfil = { nome:v('oNome'), pronome:document.getElementById('oPron').value, metaNome:v('oMeta'),
       metaValor:parseValor(v('oMetaV')), reservaMeta:parseValor(v('oRes')), ok:true };
-    salvar(); render();
+    S.tourVisto = false; aba = 'resumo'; salvar(); render(); iniciarTour();
   }
+  else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
     if (!c) return toast('Digite o e-mail da compra');
@@ -1044,11 +1046,77 @@ document.addEventListener('change', e=>{
   r.onload = () => { try {
       const d = JSON.parse(r.result); if (!d.meses || !d.perfil) throw 0;
       if (!confirm('Substituir os dados atuais pelo backup?')) return;
-      d.liberado = S.liberado || d.liberado; d.conta = S.conta || d.conta; delete d.backupEm; S = d; aba = 'resumo'; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
+      d.liberado = S.liberado || d.liberado; d.conta = S.conta || d.conta; delete d.backupEm; S = d; aba = 'resumo'; migrar(); S.tourVisto = true; S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && form && e.target.tagName==='INPUT') salvarForm(); });
+
+/* ---------- tutorial do primeiro acesso ----------
+   Escurece a tela, destaca um elemento por vez e explica. Passa pelas abas sozinho. */
+const PASSOS_TOUR = [
+  { titulo: () => `👋 ${S.perfil.pronome==='Femininos'?'Bem-vinda':S.perfil.pronome==='Masculinos'?'Bem-vindo':'Boas-vindas'}, ${esc(S.perfil.nome)}!`,
+    texto: 'Em 1 minuto você aprende a usar o app. Toque em <b>Próximo</b> para avançar.' },
+  { aba:'resumo', sel:'.hero', titulo:'Restante para gastar',
+    texto:'Quanto você ainda pode gastar no mês: suas entradas menos o que já saiu e o que você guardou. No mês atual, mostra também <b>quanto dá para gastar por dia</b>.' },
+  { aba:'resumo', sel:'.monthbar', titulo:'Mês a mês',
+    texto:'Use as setas para ver outros meses. O que sobra num mês passa para o seguinte (dá para desligar em Ajustes).' },
+  { aba:'resumo', sel:'nav .fab', titulo:'Lançar é rápido',
+    texto:'Toque no <b>+</b>, digite o valor, escolha a categoria e salve. Por ali você também lança entradas, contas e reservas. No crédito, dá para parcelar.' },
+  { aba:'resumo', sel:'#cardCategorias', titulo:'Para onde vai seu dinheiro',
+    texto:'Gráficos dos seus gastos por categoria. Toque numa categoria para ver o histórico dos últimos meses.' },
+  { aba:'lanc', sel:'.busca', titulo:'Seus lançamentos',
+    texto:'Em <b>Lançamentos</b> ficam entradas, gastos e reservas de cada mês. A busca encontra qualquer lançamento, de todos os meses.' },
+  { aba:'contas', sel:'[data-act=addConta]', titulo:'Contas fixas',
+    texto:'Cadastre aluguel, luz, internet… com o dia do vencimento. Marque ✓ quando pagar. O app avisa quando uma conta está para vencer e copia suas contas para o mês seguinte.' },
+  { aba:'metas', sel:'#cardOrcamentos', titulo:'Orçamentos',
+    texto:'Defina um limite por categoria, como Mercado R$ 800. O app avisa quando você chega perto e quando estoura.' },
+  { aba:'metas', sel:'#cardMetas', titulo:'Metas e reserva',
+    texto:'Acompanhe sua meta e sua reserva de emergência. Lance em <b>Reservas</b> o que guardar e o app mostra quando você vai chegar lá.' },
+  { aba:'ajustes', sel:'#cardBackup', titulo:'Faça backup',
+    texto:'Seus dados ficam só neste aparelho. Faça backup de vez em quando para não perder nada ao trocar de celular — o app te lembra.' },
+  { aba:'resumo', titulo:'🎉 Tudo pronto!',
+    texto:'Que tal começar lançando sua renda do mês? Depois é só ir anotando seus gastos.', final:true }
+];
+let tour = null;
+function iniciarTour(){ tour = 0; mostrarPasso(); }
+function mostrarPasso(rolar = true){
+  const p = PASSOS_TOUR[tour];
+  if (p.aba && aba !== p.aba){ aba = p.aba; render(); }
+  const el = p.sel ? document.querySelector(p.sel) : null;
+  if (rolar){ if (el && !el.closest('nav')) el.scrollIntoView({ block:'center' }); else scrollTo(0,0); }
+  requestAnimationFrame(() => desenharTour(el, p));
+}
+function desenharTour(el, p){
+  let ov = document.getElementById('tour');
+  if (!ov){ ov = document.createElement('div'); ov.id = 'tour'; ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); document.body.appendChild(ov); }
+  const r = el ? el.getBoundingClientRect() : null, pad = 6;
+  const embaixo = r && (r.top + r.height/2) < innerHeight/2;
+  const pos = !r ? 'top:50%;transform:translateY(-50%)' : embaixo ? `top:${Math.min(r.bottom + pad + 12, innerHeight - 220)}px` : `bottom:${Math.min(innerHeight - r.top + pad + 12, innerHeight - 220)}px`;
+  const titulo = typeof p.titulo === 'function' ? p.titulo() : p.titulo;
+  ov.innerHTML = (r ? `<div class="t-spot" style="top:${r.top-pad}px;left:${r.left-pad}px;width:${r.width+pad*2}px;height:${r.height+pad*2}px"></div>` : '<div class="t-dim"></div>') +
+    `<div class="t-box" style="${pos}" aria-live="polite">
+      <div class="t-passo">${tour+1} de ${PASSOS_TOUR.length}</div>
+      <h4>${titulo}</h4><p>${p.texto}</p>
+      <div class="t-acts">
+        ${p.final ? `<button class="pular" data-tour="fim">Explorar sozinho</button><button class="btn pri" data-tour="renda">Lançar minha renda</button>`
+          : `<button class="pular" data-tour="fim">Pular</button>${tour>0?'<button class="btn sec" data-tour="voltar">Voltar</button>':''}<button class="btn pri" data-tour="proximo">Próximo</button>`}
+      </div></div>`;
+}
+function fecharTour(){
+  tour = null; const ov = document.getElementById('tour'); if (ov) ov.remove();
+  S.tourVisto = true; aba = 'resumo'; salvar(); render(); scrollTo(0,0);
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-tour]'); if (!b) return;
+  e.stopPropagation();
+  const acao = b.dataset.tour;
+  if (acao === 'proximo'){ tour++; mostrarPasso(); }
+  else if (acao === 'voltar'){ tour--; mostrarPasso(); }
+  else if (acao === 'fim') fecharTour();
+  else if (acao === 'renda'){ fecharTour(); abrirForm('entradas'); }
+}, true);
+window.addEventListener('resize', () => { if (tour !== null) mostrarPasso(false); });
 
 /* ---------- telas de entrada ---------- */
 function renderOnboarding(){
@@ -1085,6 +1153,7 @@ function renderAcesso(){
 }
 
 render();
+if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
 verificarAcesso();
 window.addEventListener('online', verificarAcesso);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
