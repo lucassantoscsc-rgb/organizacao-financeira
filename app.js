@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 27;
+const APP_VERSAO = 28;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -988,6 +988,7 @@ function telaResumo(){
   if (C.credito > 0) html += `<div class="alert"><span>💳</span><div><b>${brl(C.credito)} no crédito</b> ainda não saiu do seu saldo. Esse valor entra como fatura nas saídas de ${MESES[prox.m]}.</div></div>`;
   if (C.faturaAnterior > 0) html += `<div class="alert info"><span>📥</span><div>A fatura de <b>${brl(C.faturaAnterior)}</b> do crédito usado em ${MESES[prevYM(cur.y,cur.m).m]} já está somada nas saídas deste mês.</div></div>`;
 
+  html += cardDicas();
   html += cardCategorias(C);
   html += cardOrcamentos(C);
   html += cardAssinaturas();
@@ -1008,6 +1009,66 @@ function telaResumo(){
 const stat = (k,cor,v,d) => `<div class="stat"><div class="k"><i style="background:${cor}"></i>${k}</div><div class="v num">${brl(v)}</div>${d}</div>`;
 
 // Previsão do mês atual: quanto dá para gastar por dia e onde o mês vai terminar.
+/* ---------- dicas automáticas ----------
+   Comparam o mês atual com a média dos últimos meses (proporcional ao dia do mês). */
+let dicasAbertas = false;
+const NAO_ESSENCIAIS = ['🍗 Alimentação','🎉 Lazer','📦 Compras Online','👕 Vestuário','💄 Beleza','📱 Assinaturas','🎁 Presentes'];
+const FIXAS = [CAT_CONTAS,'🧾 Contas','🧾 Parcela'];
+function calcularDicas(){
+  const y = hoje.getFullYear(), m = hoje.getMonth(), C = calc(y,m), d = hoje.getDate(), D = diasNoMes(y,m), frac = d / D;
+  const base = []; for (let i=1; i<=6 && base.length<3; i++){ const o = somaMeses(y,m,-i); if (temDados(S.meses[key(o.y,o.m)])) base.push(calc(o.y,o.m)); }
+  const dicas = [], pct = (a,b) => Math.round(Math.abs(a/b - 1) * 100);
+  const media = {}; if (base.length) CATEGORIAS.concat([CAT_CONTAS]).forEach(c => media[c] = soma(base, b=>b.cats[c]||0) / base.length);
+  // 1-2. categorias acima/abaixo do normal para esta altura do mês
+  if (base.length && frac >= 0.2) Object.entries(media).forEach(([c, md]) => {
+    if (FIXAS.includes(c) || md < 50) return;
+    const esp = md * frac, at = C.cats[c] || 0;
+    if (at > esp * 1.3 && at - esp >= 40) dicas.push({ e:'📈', p: 60 + (at-esp)/10, t:`<b>${esc(nomeCat(c))}</b>: você já gastou ${brl(at)}, ${pct(at,esp)}% acima do normal para esta altura do mês.` });
+    else if (md >= 100 && frac >= 0.4 && at < esp * 0.7) dicas.push({ e:'👏', p: 30, t: at === 0 ? `Nada gasto em <b>${esc(nomeCat(c))}</b> até agora este mês. Continue assim!` : `<b>${esc(nomeCat(c))}</b> está ${pct(at,esp)}% abaixo do normal. Continue assim!` });
+  });
+  // 3. ritmo geral
+  if (base.length && frac >= 0.25){
+    const esp = soma(Object.entries(media).filter(([c])=>!FIXAS.includes(c)), x=>x[1]) * frac;
+    const at = C.consumo - (C.cats[CAT_CONTAS]||0) - (C.cats['🧾 Contas']||0) - (C.cats['🧾 Parcela']||0);
+    if (esp > 0 && at > esp * 1.15) dicas.push({ e:'⚠️', p: 75, t:`No geral, você está gastando <b>${pct(at,esp)}% acima do normal</b> neste mês.` });
+    else if (esp > 0 && at < esp * 0.85) dicas.push({ e:'🎉', p: 45, t:`Você está gastando <b>${pct(at,esp)}% menos</b> que o normal neste mês. Mandou bem!` });
+  }
+  // 4. ainda não guardou
+  if (d >= 10 && C.entradasLanc > 0 && C.reservas <= 0) dicas.push({ e:'🐷', p: 70, acao:'guardar', t:`Você ainda não guardou nada este mês. Que tal guardar <b>${brl(Math.round(C.entradasLanc*0.1/10)*10)}</b> (10% da renda) agora?` });
+  // 5. gastos pequenos
+  const M = mes(y,m), peq = M.gastos.filter(g=>!ehParcelado(g) && g.valor <= 30);
+  if (peq.length >= 8 && soma(peq,g=>g.valor) >= 150) dicas.push({ e:'☕', p: 50, t:`Os gastos pequenos (até R$ 30) já somam <b>${brl(soma(peq,g=>g.valor))}</b> este mês, em ${peq.length} lançamentos.` });
+  // 6. economia anual cortando 20% da maior categoria não essencial
+  const top = Object.entries(media).filter(([c])=>NAO_ESSENCIAIS.includes(c)).sort((a,b)=>b[1]-a[1])[0];
+  if (top && top[1] >= 150) dicas.push({ e:'✂️', p: 28, t:`Cortando 20% de <b>${esc(nomeCat(top[0]))}</b>, você economiza ${brl0(top[1]*0.2*12)} por ano.` });
+  // 7. dia da semana que mais gasta (últimos 60 dias)
+  const porDia = [0,0,0,0,0,0,0], limite = new Date(Date.now() - 60*864e5).toISOString().slice(0,10);
+  Object.values(S.meses).forEach(Mx => Mx.gastos.forEach(g => { if (!ehParcelado(g) && g.data && g.data >= limite) porDia[new Date(g.data+'T12:00:00').getDay()] += +g.valor; }));
+  const totDias = soma(porDia, v=>v), maxDia = Math.max(...porDia);
+  if (totDias > 300 && maxDia/totDias >= 0.24){ const n = porDia.indexOf(maxDia); dicas.push({ e:'📅', p: 20, t:`<b>${DIAS_SEMANA[n].charAt(0).toUpperCase()+DIAS_SEMANA[n].slice(1)}</b> é o dia em que você mais gasta: ${Math.round(maxDia/totDias*100)}% dos gastos dos últimos 2 meses.` }); }
+  // 8. parcelas futuras pesadas
+  const renda = base.length ? soma(base, b=>b.entradasLanc)/base.length : C.entradasLanc, fut = comprometidoFuturo();
+  if (renda > 0 && fut > renda * 0.3) dicas.push({ e:'💳', p: 55, t:`Você já tem <b>${brl(fut)}</b> em parcelas nos próximos meses (${Math.round(fut/renda*100)}% de um mês de renda). Cuidado com novas compras parceladas.` });
+  // 9. assinaturas
+  const assin = detectarAssinaturas().filter(a=>a.ativa), anual = soma(assin, a=>a.valor) * 12;
+  if (anual >= 600) dicas.push({ e:'🔁', p: 25, acao:'assinaturas', t:`Suas assinaturas custam <b>${brl0(anual)} por ano</b>. Vale revisar se você usa todas.` });
+  // 10. não essenciais
+  const naoEss = C.consumo - C.essenciais;
+  if (C.consumo > 500 && naoEss / C.consumo > 0.45) dicas.push({ e:'🎯', p: 35, t:`${Math.round(naoEss/C.consumo*100)}% dos seus gastos deste mês são <b>não essenciais</b>.` });
+  // no máximo 2 dicas do tipo "acima do normal" (as maiores), para não repetir
+  dicas.sort((a,b) => b.p - a.p);
+  let acima = 0;
+  return dicas.filter(x => x.e !== '📈' || ++acima <= 2);
+}
+function cardDicas(){
+  if (key(cur.y,cur.m) !== chaveHoje()) return '';
+  const dicas = calcularDicas(); if (!dicas.length) return '';
+  const vis = dicasAbertas ? dicas : dicas.slice(0,3);
+  return `<section class="card" id="cardDicas"><h3>💡 Dicas do mês</h3>
+    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':''}</div></div>`).join('')}</div>
+    ${dicas.length > 3 ? `<button class="d-mais" data-act="maisDicas">${dicasAbertas?'Mostrar menos':`Ver mais ${dicas.length-3} dica${dicas.length-3>1?'s':''}`}</button>` : ''}</section>`;
+}
+
 /* ---------- "Posso comprar?" ----------
    Compara a compra com o que costuma sobrar por mês (média dos últimos meses completos). */
 function fimDoMesPrevisto(){
@@ -1904,6 +1965,8 @@ document.addEventListener('click', e=>{
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='maisDicas'){ dicasAbertas = !dicasAbertas; render(); }
+  else if (a==='guardarAgora'){ const C = calc(hoje.getFullYear(), hoje.getMonth()); abrirForm('reservas'); document.getElementById('fValor').value = moneyVal(Math.round(C.entradasLanc*0.1/10)*10); }
   else if (a==='simFechar'){ fechar(); }
   else if (a==='simLancar'){
     const valor = parseValor(document.getElementById('sValor').value), nome = document.getElementById('sNome').value.trim(), credito = form.v.credito, n = credito ? +document.getElementById('sParc').value : 1;
