@@ -36,7 +36,12 @@ function novoEstado(){
 }
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
-function migrar(){ if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; S.v = 2; }
+function migrar(){
+  if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; S.v = 2;
+  // Quem já usava antes do lembrete de backup: conta os lançamentos existentes como "sem backup".
+  if (S.novosDesdeBackup == null) S.novosDesdeBackup = S.ultimoBackup ? 0 :
+    Object.values(S.meses).reduce((a,M)=>a+M.entradas.length+M.gastos.length+M.contas.length+M.reservas.length, 0);
+}
 migrar();
 // Tema: 'auto' segue o celular; 'claro' e 'escuro' forçam.
 function aplicarTema(){
@@ -263,6 +268,7 @@ function telaResumo(){
     ${blocoPrevisao(C)}
   </section>`;
 
+  html += lembreteBackup();
   html += alertasContas();
   html += alertasOrcamento(C);
 
@@ -311,6 +317,21 @@ function blocoPrevisao(C){
   return h;
 }
 
+// Lembrete de backup: os dados ficam só no aparelho.
+const diasDesde = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 864e5) : Infinity;
+function precisaBackup(){
+  const n = S.novosDesdeBackup || 0;
+  if (!n) return false;
+  if (S.backupAdiado && diasDesde(S.backupAdiado) < 3) return false;
+  if (!S.ultimoBackup) return n >= 5;
+  return n >= 15 || diasDesde(S.ultimoBackup) >= 30;
+}
+function lembreteBackup(){
+  if (!precisaBackup()) return '';
+  const quando = S.ultimoBackup ? `Seu último backup foi há ${diasDesde(S.ultimoBackup)} dia${diasDesde(S.ultimoBackup)===1?'':'s'}` : 'Você ainda não fez nenhum backup';
+  return `<div class="alert info backup"><span>💾</span><div><b>Proteja seus dados</b><br>${quando} e tem ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} novo${S.novosDesdeBackup>1?'s':''}. Se trocar de celular ou limpar o navegador, eles se perdem.
+    <div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="adiarBackup">Depois</button></div></div></div>`;
+}
 function alertasContas(){
   if (key(cur.y,cur.m) !== chaveHoje()) return '';
   const M = mes(cur.y,cur.m);
@@ -580,8 +601,9 @@ function telaAjustes(){
     ${ios ? '<p class="note">No Safari, toque em <b>Compartilhar</b> e depois em <b>Adicionar à Tela de Início</b>.</p>'
           : `<button class="btn pri" data-act="instalar">📲 Instalar app</button><p class="note">Se o botão não funcionar, abra o menu do navegador e toque em “Instalar app” ou “Adicionar à tela inicial”.</p>`}</section>`}
   <section class="card"><h3>Backup dos dados</h3>
-    <p class="note" style="margin:0 0 12px">Seus dados ficam só neste aparelho. Faça backup antes de trocar de celular ou limpar o navegador.</p>
-    <button class="btn sec" data-act="exportar">⬇️ Baixar backup</button>
+    <p class="note" style="margin:0 0 12px">Seus dados ficam só neste aparelho. Faça backup antes de trocar de celular ou limpar o navegador. Guarde o arquivo no Google Drive, iCloud, WhatsApp ou e-mail.</p>
+    <p class="note" style="margin:0 0 12px">Último backup: <b>${S.ultimoBackup ? new Date(S.ultimoBackup).toLocaleDateString('pt-BR') + ` (${diasDesde(S.ultimoBackup)===0?'hoje':'há '+diasDesde(S.ultimoBackup)+' dias'})` : 'nunca'}</b>${S.novosDesdeBackup?` · ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} desde então`:''}</p>
+    <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
     <button class="btn sec" data-act="importar">⬆️ Restaurar backup</button>
     <input type="file" id="fileImp" accept="application/json,.json" hidden></section>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
@@ -701,7 +723,7 @@ function salvarForm(){
     obj = { tipo:v.tipo, nome:g('fNome'), valor, data:g('fData') };
   }
   if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
-  else M[tipo].push({ id:uid(), ...obj });
+  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; }
   salvar(); fechar();
   if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
@@ -815,11 +837,8 @@ document.addEventListener('click', e=>{
     if (deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(()=>{deferredPrompt=null;}); }
     else toast('Use o menu do navegador → Instalar app');
   }
-  else if (a==='exportar'){
-    const blob = new Blob([JSON.stringify(S,null,2)],{type:'application/json'});
-    const l = document.createElement('a'); l.href=URL.createObjectURL(blob);
-    l.download = 'backup-financas-'+dataHoje()+'.json'; l.click(); setTimeout(()=>URL.revokeObjectURL(l.href),1000);
-  }
+  else if (a==='exportar'){ fazerBackup(); }
+  else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
   else if (a==='zerar'){
     if (!confirm('Apagar TODOS os dados deste aparelho? Isso não pode ser desfeito.')) return;
@@ -842,6 +861,28 @@ document.addEventListener('click', e=>{
   }
 });
 
+// Gera o arquivo de backup. No celular, abre o menu de compartilhar (salvar em Arquivos, Drive, WhatsApp, e-mail);
+// onde não houver, baixa o arquivo.
+function fazerBackup(){
+  const nome = 'backup-financas-'+dataHoje()+'.json';
+  const marcar = () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); };
+  const dados = JSON.stringify({ ...S, backupEm: new Date().toISOString() }, null, 2);
+  let arquivo = null;
+  try { arquivo = new File([dados], nome, { type:'application/json' }); } catch(e){}
+  if (arquivo && navigator.canShare && navigator.canShare({ files:[arquivo] }) && matchMedia('(pointer:coarse)').matches){
+    navigator.share({ files:[arquivo], title:'Backup Organização Financeira' })
+      .then(marcar)
+      .catch(err => { if (err && err.name !== 'AbortError') baixar(); });
+    return;
+  }
+  baixar();
+  function baixar(){
+    const l = document.createElement('a'); l.href = URL.createObjectURL(new Blob([dados],{type:'application/json'}));
+    l.download = nome; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(l.href),1000);
+    marcar();
+  }
+}
+
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
   if (e.target.id==='fBusca'){
@@ -859,7 +900,7 @@ document.addEventListener('change', e=>{
   r.onload = () => { try {
       const d = JSON.parse(r.result); if (!d.meses || !d.perfil) throw 0;
       if (!confirm('Substituir os dados atuais pelo backup?')) return;
-      d.liberado = S.liberado || d.liberado; S = d; migrar(); salvar(); render(); toast('Backup restaurado ✓');
+      d.liberado = S.liberado || d.liberado; delete d.backupEm; S = d; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
