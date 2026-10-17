@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 29;
+const APP_VERSAO = 30;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -1141,7 +1141,11 @@ function calcularDicas(){
   // 9. assinaturas
   const assin = detectarAssinaturas().filter(a=>a.ativa), anual = soma(assin, a=>a.valor) * 12;
   if (anual >= 600) dicas.push({ e:'🔁', p: 25, acao:'assinaturas', t:`Suas assinaturas custam <b>${brl0(anual)} por ano</b>. Vale revisar se você usa todas.` });
-  // 10. não essenciais
+  // 10. meta da reserva muito abaixo do ideal (ou sem reserva)
+  const res = cofReserva(), ideal = reservaIdeal(6);
+  if (ideal && !res) dicas.push({ e:'🛟', p: 40, acao:'criarReserva', t:`Você ainda não tem reserva de emergência. O ideal para você é cerca de <b>${brl0(ideal)}</b>.` });
+  else if (ideal && res && res.alvo < ideal * 0.6) dicas.push({ e:'🛟', p: 32, acao:'abrirReserva', t:`A meta da sua reserva (${brl0(res.alvo||0)}) está abaixo do ideal para os seus gastos: cerca de <b>${brl0(ideal)}</b>.` });
+  // 11. não essenciais
   const naoEss = C.consumo - C.essenciais;
   if (C.consumo > 500 && naoEss / C.consumo > 0.45) dicas.push({ e:'🎯', p: 35, t:`${Math.round(naoEss/C.consumo*100)}% dos seus gastos deste mês são <b>não essenciais</b>.` });
   // no máximo 2 dicas do tipo "acima do normal" (as maiores), para não repetir
@@ -1154,7 +1158,7 @@ function cardDicas(){
   const dicas = calcularDicas(); if (!dicas.length) return '';
   const vis = dicasAbertas ? dicas : dicas.slice(0,3);
   return `<section class="card" id="cardDicas"><h3>💡 Dicas do mês</h3>
-    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':''}</div></div>`).join('')}</div>
+    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':x.acao==='criarReserva'?'<button class="d-acao" data-act="criarReserva">Criar reserva</button>':x.acao==='abrirReserva'?'<button class="d-acao" data-act="abrirReserva">Ajustar meta</button>':''}</div></div>`).join('')}</div>
     ${dicas.length > 3 ? `<button class="d-mais" data-act="maisDicas">${dicasAbertas?'Mostrar menos':`Ver mais ${dicas.length-3} dica${dicas.length-3>1?'s':''}`}</button>` : ''}</section>`;
 }
 
@@ -1468,6 +1472,32 @@ function abrirCategoria(c){
     ${c!==CAT_CONTAS?`<div class="f" style="margin-top:14px"><label>Orçamento mensal para ${esc(nomeCat(c))}</label><div class="inline"><input class="num" id="oCat" inputmode="decimal" placeholder="Sem limite" value="${lim?moneyVal(lim):''}"><button class="btn pri" data-act="salvarOrcCat" data-c="${esc(c)}">Salvar</button></div></div>`:''}`);
 }
 
+/* ---------- reserva de emergência ideal ----------
+   Gastos essenciais médios (contas pagas + gastos marcados como essenciais) dos últimos meses completos.
+   Ideal: 6 meses (3 para emprego estável, 12 para renda variável). */
+const ehReserva = (c) => c && (c.id === 'reserva' || /emerg/.test(semAcento(c.nome)));
+const cofReserva = () => S.cofrinhos.find(ehReserva);
+function essenciaisMedios(){
+  const y = hoje.getFullYear(), m = hoje.getMonth(), cs = [];
+  for (let i=1; i<=6 && cs.length<3; i++){ const o = somaMeses(y,m,-i); if (temDados(S.meses[key(o.y,o.m)])) cs.push(calc(o.y,o.m)); }
+  if (!cs.length) return 0;
+  return soma(cs, c=>c.essenciais) / cs.length;
+}
+const reservaIdeal = (meses) => Math.round(essenciaisMedios() * (meses||6) / 100) * 100;
+function blocoReservaIdeal(c){
+  const ess = essenciaisMedios(); if (!ess) return '<p class="note">Com pelo menos 1 mês completo de uso, o app calcula a sua reserva ideal.</p>';
+  const total = guardadoAte(c.id, key(cur.y,cur.m)), cobre = total / ess;
+  return `<div class="reserva-ideal"><b>🛟 Reserva ideal para você</b>
+    <p>Seus gastos essenciais são de cerca de <b>${brl0(ess)}/mês</b>. A reserva serve para cobrir esses gastos se a renda parar.</p>
+    <div class="ri-opcoes">${[[3,'Emprego estável'],[6,'Recomendado'],[12,'Autônomo / renda variável']].map(([n,l])=>`<button data-act="usarIdeal" data-meses="${n}" data-cof-id="${c.id}" class="${c.alvo && Math.abs(c.alvo - reservaIdeal(n)) < 1 ? 'on' : ''}"><b class="num">${brl0(reservaIdeal(n))}</b><span>${n} meses · ${l}</span></button>`).join('')}</div>
+    <p class="ri-cobre">🛡️ Hoje sua reserva cobre <b>${cobre < 0.1 ? 'menos de 0,1' : cobre.toLocaleString('pt-BR',{maximumFractionDigits:1})} ${cobre>=0.95 && cobre<1.05?'mês':'meses'}</b> dos seus gastos essenciais.</p></div>`;
+}
+function sugestaoReserva(){
+  if (cofReserva()) return '';
+  const ideal = reservaIdeal(6); if (!ideal) return '';
+  return `<div class="dica" style="margin-bottom:12px"><span class="d-e">🛟</span><div><span>Você ainda não tem uma <b>reserva de emergência</b>. Para você, o ideal é cerca de <b>${brl0(ideal)}</b> (6 meses de gastos essenciais).</span><button class="d-acao" data-act="criarReserva">Criar reserva</button></div></div>`;
+}
+
 // Cofrinhos com progresso, quanto guardar por mês (se tiver prazo) ou previsão pelo ritmo.
 function blocoCofrinhos(compacto){
   const k = key(cur.y,cur.m);
@@ -1478,7 +1508,7 @@ function blocoCofrinhos(compacto){
     return `<button class="goal cof" data-cof="${c.id}"><span class="row"><b>${c.emoji} ${esc(c.nome)}</b><span class="num">${brl(total)}${c.alvo?` de ${brl(c.alvo)}`:''}</span></span>
       ${c.alvo?`<span class="bar"><span style="width:${pct}%"></span></span>`:''}
       <span class="foot num"><span>${mesV>=0?'+':''}${brl(mesV)} este mês</span>${c.alvo?`<span>${total>=c.alvo?'Concluído':`Faltam ${brl(c.alvo-total)}`} · ${pct.toFixed(0)}%</span>`:''}</span>
-      ${compacto?'':previsaoCofrinho(c, total)}</button>`;
+      ${compacto?'':previsaoCofrinho(c, total)}${ehReserva(c) && essenciaisMedios() && total > 0 ? `<span class="gprev">🛡️ Cobre ${(total/essenciaisMedios()).toLocaleString('pt-BR',{maximumFractionDigits:1})} ${total/essenciaisMedios()>=0.95 && total/essenciaisMedios()<1.05?'mês':'meses'} dos seus gastos essenciais.</span>` : ''}</button>`;
   }).join('');
 }
 function previsaoCofrinho(c, total){
@@ -1497,7 +1527,7 @@ function previsaoCofrinho(c, total){
   return `<span class="gprev">📅 No seu ritmo (${brl0(media)}/mês), você chega lá em <b>${MESES[q.m].toLowerCase()} de ${q.y}</b>.</span>`;
 }
 function cardCofrinhos(compacto){
-  return `<section class="card" id="cardMetas"><h3>Cofrinhos <small>${compacto?'acumulado até '+MESES[cur.m].toLowerCase():''}</small></h3>${blocoCofrinhos(compacto)}
+  return `<section class="card" id="cardMetas"><h3>Cofrinhos <small>${compacto?'acumulado até '+MESES[cur.m].toLowerCase():''}</small></h3>${compacto?'':sugestaoReserva()}${blocoCofrinhos(compacto)}
     ${compacto?'':'<button class="btn sec" data-act="novoCof">+ Novo cofrinho</button>'}</section>`;
 }
 // Detalhe de um cofrinho: progresso, movimentações e ações.
@@ -1509,6 +1539,7 @@ function abrirCofrinho(id){
   abrir(`<h2>${c.emoji} ${esc(c.nome)}</h2>
     <div class="kpis"><div><span>Guardado</span><b class="num">${brl(total)}</b></div>${c.alvo?`<div><span>Meta</span><b class="num">${brl(c.alvo)}</b></div>`:''}${c.prazo?`<div><span>Prazo</span><b>${MES_CURTO[ymDe(c.prazo).m]}/${ymDe(c.prazo).y}</b></div>`:''}</div>
     ${previsaoCofrinho(c, total).replace('<span class="gprev','<p class="gprev').replace(/<\/span>$/,'</p>')}
+    ${ehReserva(c) ? blocoReservaIdeal(c) : ''}
     <div class="row2" style="margin:14px 0"><button class="btn pri" data-act="guardarCof" data-cof-id="${id}">+ Guardar</button><button class="btn sec" data-act="retirarCof" data-cof-id="${id}">− Retirar</button></div>
     <h4 class="sub-h">Movimentações</h4>
     <div class="list flat">${movs.slice(0,30).map(({mk,r})=>`<button class="item" data-edit="reservas" data-id="${r.id}" data-mk="${mk}"><div class="tx"><div class="t1">${r.valor<0?'Retirada':esc(r.nome||'Guardado')}</div><div class="t2">${r.data?fmtData(r.data)+'/'+mk.slice(0,4):MESES[ymDe(mk).m]}</div></div><div class="val num ${r.valor<0?'down':'up'}">${r.valor<0?'−':'+'}${brl(Math.abs(r.valor))}</div></button>`).join('') || '<div class="empty">Nada guardado ainda.</div>'}</div>
@@ -2068,6 +2099,9 @@ document.addEventListener('click', e=>{
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='usarIdeal'){ const c = cofPorId(t.dataset.cofId); c.alvo = reservaIdeal(+t.dataset.meses); salvar(); render(); abrirCofrinho(c.id); toast('Meta da reserva atualizada ✓'); }
+  else if (a==='criarReserva'){ if (!cofPorId('reserva')) S.cofrinhos.unshift({ id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:reservaIdeal(6), prazo:'' }); salvar(); render(); abrirCofrinho(cofReserva().id); toast('Reserva criada ✓'); checarConquistas(); }
+  else if (a==='abrirReserva'){ abrirCofrinho(cofReserva().id); }
   else if (a==='novoCartao'){ editarCartao(); }
   else if (a==='salvarCartao'){ salvarCartao(); }
   else if (a==='excluirCartao'){ excluirCartao(); }
