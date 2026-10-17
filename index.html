@@ -26,6 +26,7 @@
   --nav-bg:rgba(255,255,255,.96); --nav-ink:#7f9592; --fab-shadow:0 8px 20px rgba(11,59,58,.35);
   --danger-soft:#fde8e8; --danger-ink:#8f1c1c; --warn-ink:#6b4a10; --info-soft:#eef6f5; --info-ink:#0b3b3a;
   --check:#b9cbc8; --grab:#d5dfdd; --tg-off:#cfdcd9; --grid:#e8efed; --axis:#c9d6d3; --cat-dim:#9fc9c3; --dot-no:#c3d3d0;
+  --tour-bg:#0b3b3a; --tour-ink:#fff; --tour-muted:rgba(255,255,255,.82); --tour-accent:#5eead4; --tour-btn:#2dd4bf; --tour-btn-ink:#062e2b; --tour-sec:rgba(255,255,255,.14);
   --ent:#1baf7a; --sai:#eb6834; --pend:#f2c1c3; --overlay:rgba(10,30,29,.45); --toast-bg:#10201f; --toast-ink:#fff;
   color-scheme:light;
 }
@@ -39,6 +40,7 @@
   --nav-bg:rgba(22,32,31,.96); --nav-ink:#6f8783; --fab-shadow:0 8px 20px rgba(0,0,0,.45);
   --danger-soft:#3b1c1e; --danger-ink:#f5a5a7; --warn-ink:#f0c879; --info-soft:#15302c; --info-ink:#a7e9de;
   --check:#4a5e5a; --grab:#3a4a47; --tg-off:#3a4a47; --grid:#22302d; --axis:#3a4a47; --cat-dim:#2f5c56; --dot-no:#4a5e5a;
+  --tour-bg:#f1fbf9; --tour-ink:#0b2a28; --tour-muted:#3d5653; --tour-accent:#0f766e; --tour-btn:#0b3b3a; --tour-btn-ink:#fff; --tour-sec:#dcefeb;
   --ent:#199e70; --sai:#d95926; --pend:#6b3438; --overlay:rgba(0,0,0,.6); --toast-bg:#e4eeec; --toast-ink:#10201f;
   color-scheme:dark;
 }}
@@ -52,6 +54,7 @@
   --nav-bg:rgba(22,32,31,.96); --nav-ink:#6f8783; --fab-shadow:0 8px 20px rgba(0,0,0,.45);
   --danger-soft:#3b1c1e; --danger-ink:#f5a5a7; --warn-ink:#f0c879; --info-soft:#15302c; --info-ink:#a7e9de;
   --check:#4a5e5a; --grab:#3a4a47; --tg-off:#3a4a47; --grid:#22302d; --axis:#3a4a47; --cat-dim:#2f5c56; --dot-no:#4a5e5a;
+  --tour-bg:#f1fbf9; --tour-ink:#0b2a28; --tour-muted:#3d5653; --tour-accent:#0f766e; --tour-btn:#0b3b3a; --tour-btn-ink:#fff; --tour-sec:#dcefeb;
   --ent:#199e70; --sai:#d95926; --pend:#6b3438; --overlay:rgba(0,0,0,.6); --toast-bg:#e4eeec; --toast-ink:#10201f;
   color-scheme:dark;
 }
@@ -304,16 +307,18 @@ details.mais[open] summary::before{content:"− "}
 
 /* tutorial */
 #tour{position:fixed;inset:0;z-index:100}
-#tour .t-dim{position:absolute;inset:0;background:rgba(4,14,13,.62)}
-#tour .t-spot{position:absolute;border-radius:16px;box-shadow:0 0 0 9999px rgba(4,14,13,.62);outline:2px solid var(--mint);outline-offset:0;transition:all .25s ease;pointer-events:none}
-#tour .t-box{position:absolute;left:16px;right:16px;max-width:380px;margin:0 auto;background:var(--surface);color:var(--ink);border-radius:18px;padding:16px 18px;box-shadow:0 12px 32px rgba(0,0,0,.3);animation:fade .2s}
-#tour .t-passo{font-size:12px;font-weight:700;color:var(--teal);letter-spacing:.02em}
-#tour h4{margin:4px 0 6px;font-size:17px;letter-spacing:-.01em}
-#tour p{margin:0;font-size:14.5px;color:var(--muted);line-height:1.45}
-#tour p b{color:var(--ink)}
+#tour .t-dim{position:absolute;inset:0;background:rgba(4,14,13,.66)}
+#tour .t-spot{position:absolute;border-radius:16px;box-shadow:0 0 0 9999px rgba(4,14,13,.66);outline:3px solid #2dd4bf;outline-offset:1px;transition:all .25s ease;pointer-events:none}
+#tour .t-box{position:absolute;left:16px;right:16px;max-width:380px;margin:0 auto;background:var(--tour-bg);color:var(--tour-ink);border-radius:18px;padding:16px 18px;box-shadow:0 14px 36px rgba(0,0,0,.4);animation:fade .2s}
+#tour .t-passo{font-size:12px;font-weight:700;color:var(--tour-accent);letter-spacing:.02em}
+#tour h4{margin:4px 0 6px;font-size:17px;letter-spacing:-.01em;color:var(--tour-ink)}
+#tour p{margin:0;font-size:14.5px;color:var(--tour-muted);line-height:1.45}
+#tour p b{color:var(--tour-ink)}
 #tour .t-acts{display:flex;gap:8px;align-items:center;margin-top:14px}
-#tour .pular{margin-right:auto;color:var(--muted);font-size:14px;font-weight:600;padding:8px 2px}
+#tour .pular{margin-right:auto;color:var(--tour-muted);font-size:14px;font-weight:600;padding:8px 2px}
 #tour .btn{width:auto;padding:10px 16px;font-size:14px;margin:0}
+#tour .btn.pri{background:var(--tour-btn);color:var(--tour-btn-ink)}
+#tour .btn.sec{background:var(--tour-sec);color:var(--tour-ink)}
 
 /* busca */
 .busca{position:relative;margin-bottom:12px}
