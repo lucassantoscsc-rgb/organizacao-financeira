@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 35;
+const APP_VERSAO = 36;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -2758,7 +2758,8 @@ function mostrarPasso(rolar = true){
   const p = PASSOS_TOUR[tour];
   if (p.aba && aba !== p.aba){ aba = p.aba; render(); }
   const el = p.sel ? document.querySelector(p.sel) : null;
-  if (rolar){ if (el && !el.closest('nav')) el.scrollIntoView({ block:'center' }); else scrollTo(0,0); }
+  // Rola só esta janela (scrollIntoView também rolaria a página de vendas quando o app está embutido)
+  if (rolar){ if (el && !el.closest('nav')){ const r = el.getBoundingClientRect(); scrollTo(0, Math.max(0, r.top + scrollY - (innerHeight - r.height) / 2)); } else scrollTo(0,0); }
   requestAnimationFrame(() => desenharTour(el, p));
 }
 function desenharTour(el, p){
