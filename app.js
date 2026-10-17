@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 33;
+const APP_VERSAO = 34;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -2881,7 +2881,7 @@ function dadosDemo(){
     if (off === -1) M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'note', valor:400, nome:'', data:dia(28) });
     if (off === 0 && lim >= 9){ const jt = { id:uid(), cat:'🍗 Alimentação', desc:'Jantar com amigos', valor:240, minha:80, dividido:['Ana','Bruno'], forma:'Crédito', cartao:'nubank', data:dia(9), essencial:false, parcelas:1 };
       M.gastos.push(jt); ['Ana','Bruno'].forEach(p => D.aReceber.push({ id:uid(), pessoa:p, desc:'Jantar com amigos', valor:80, data:jt.data, recebido:false, gastoId:jt.id, mk:k })); }
-    if (off === -1){ g('🎉 Lazer','Passeio de barco', 180, 'Crédito', 20, { tags:['Viagem Praia'] }); g('🍗 Alimentação','Restaurante na praia', 145, 'Crédito', 21, { tags:['Viagem Praia'] }); g('⛽ Gasolina','Posto na estrada', 210, 'Débito', 19, { tags:['Viagem Praia'] }); g('🏠 Casa','Pousada', 620, 'Crédito', 19, { tags:['Viagem Praia'] }); }
+    if (off === -1){ g('🎉 Lazer','Passeio de barco', 180, 'Pix / Dinheiro', 20, { tags:['Viagem Praia'] }); g('🍗 Alimentação','Restaurante na praia', 145, 'Débito', 21, { tags:['Viagem Praia'] }); g('⛽ Gasolina','Posto na estrada', 210, 'Débito', 19, { tags:['Viagem Praia'] }); g('🏠 Casa','Pousada', 620, 'Pix / Dinheiro', 19, { tags:['Viagem Praia'] }); }
     if (off === -1) D.aReceber.push({ id:uid(), pessoa:'Carlos', desc:'Ingresso do show', valor:150, data:dia(12), recebido:false });
     M.auto = true;
   }
