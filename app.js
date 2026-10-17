@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 24;
+const APP_VERSAO = 25;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -300,6 +300,17 @@ function vencimentosFuturos(){
 }
 let esperaNotif = null;
 function agendarSyncNotif(){ if (!notifLigada()) return; clearTimeout(esperaNotif); esperaNotif = setTimeout(sincronizarNotif, 2500); }
+async function testarNotif(){
+  try {
+    const reg = await navigator.serviceWorker.ready, sub = await reg.pushManager.getSubscription();
+    if (!sub) return toast('Este aparelho não está inscrito. Desligue e ligue a notificação de novo.');
+    const r = await fetch('api/notificacoes', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+      acao:'teste', conta:S.conta, aparelho:idAparelho(), sub:sub.toJSON(), diario:!!S.notif.diario, contas:!!S.notif.contas,
+      vencimentos: vencimentosFuturos(), ultimoDia: (S.diasAtivos||[]).slice(-1)[0] || null }) });
+    const d = await r.json();
+    toast(d.ok ? 'Enviada! Deve chegar em alguns segundos.' : (r.status===403 ? 'Este aparelho não está liberado na conta. Saia e entre de novo.' : d.erro || 'Não foi possível enviar.'));
+  } catch(e){ toast('Sem internet ou erro ao enviar.'); }
+}
 async function sincronizarNotif(acao){
   if (!suportaPush()) return;
   try {
@@ -341,6 +352,7 @@ function cardNotificacoes(){
     ${semSuporte ? `<p class="note" style="margin:0">${ehIOS ? 'No iPhone, as notificações funcionam com o app <b>instalado na tela de início</b> (iOS 16.4 ou mais novo). Instale e ative por lá.' : 'Este navegador não recebe notificações.'}</p>` : `
     <div class="switch"><span>Lembrete para anotar os gastos <small class="muted">(por volta das 20h, se você ainda não anotou)</small></span><button class="tg ${n.diario?'on':''}" data-act="notif" data-tipo="diario" aria-label="Lembrete diário"></button></div>
     <div class="switch" style="margin-top:8px"><span>Aviso de contas <small class="muted">(na véspera do vencimento)</small></span><button class="tg ${n.contas?'on':''}" data-act="notif" data-tipo="contas" aria-label="Aviso de contas"></button></div>
+    ${notifLigada() ? '<button class="btn sec" data-act="notifTeste" style="margin-top:10px">🔔 Enviar notificação de teste</button>' : ''}
     ${negado ? '<p class="note">As notificações estão bloqueadas para este app. Libere nos ajustes do celular.</p>' : '<p class="note">Para avisar das contas, o app envia só as datas de vencimento, sem nomes nem valores.</p>'}`}</section>`;
 }
 
@@ -1801,6 +1813,7 @@ document.addEventListener('click', e=>{
   else if (a==='importarExtrato'){ let f = document.getElementById('fileExtrato'); if (!f){ f = document.createElement('input'); f.type = 'file'; f.id = 'fileExtrato'; f.hidden = true; document.body.appendChild(f); } f.value = ''; f.click(); }
   else if (a==='confirmarImp'){ confirmarImportacao(); }
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
+  else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();

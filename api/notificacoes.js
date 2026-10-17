@@ -3,6 +3,7 @@
 // Guardamos só: a inscrição do aparelho, as preferências, o último dia com lançamento e
 // quantas contas vencem em cada data (sem nomes nem valores).
 const crypto = require('crypto');
+const webpush = require('web-push');
 const { redis, normalizar } = require('./_db');
 
 const chave = (endpoint) => crypto.createHash('sha256').update(String(endpoint)).digest('hex').slice(0, 24);
@@ -25,6 +26,13 @@ module.exports = async (req, res) => {
 
     const id = chave(b.sub.endpoint);
     if (b.acao === 'remover') { await redis('HDEL', 'push', id); return res.json({ ok: true }); }
+    if (b.acao === 'teste') {
+      webpush.setVapidDetails('https://planilhadeorganizacaofinanceira.online', process.env.VAPID_PUBLIC, process.env.VAPID_PRIVATE);
+      try {
+        await webpush.sendNotification({ endpoint: b.sub.endpoint, keys: b.sub.keys || {} },
+          JSON.stringify({ title: '🔔 Notificações funcionando!', body: 'É assim que você vai receber os lembretes.', url: './' }), { TTL: 600 });
+      } catch (e) { return res.status(502).json({ ok: false, erro: 'O serviço de notificações do celular recusou o envio (' + (e.statusCode || 'erro') + ').' }); }
+    }
     const venc = {};
     Object.entries(b.vencimentos || {}).slice(0, 60).forEach(([d, n]) => { if (/^\d{4}-\d{2}-\d{2}$/.test(d)) venc[d] = Math.min(20, +n || 0); });
     await redis('HSET', 'push', id, JSON.stringify({
