@@ -1,6 +1,6 @@
 {
-  "versao": 23,
+  "versao": 24,
   "novidades": [
-    "📥 Importar extrato do banco: baixe o extrato (OFX ou CSV) no app do seu banco e importe em Lançamentos → Gastos. O app sugere as categorias e você confere antes."
+    "🔔 Notificações: lembrete para anotar os gastos e aviso de contas na véspera do vencimento. Ative em Ajustes → Notificações (no iPhone, com o app instalado na tela de início)."
   ]
 }

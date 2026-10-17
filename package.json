@@ -1,0 +1,8 @@
+{
+  "name": "organizacao-financeira",
+  "private": true,
+  "description": "App PWA. Dependências usadas só pelas funções em api/ (notificações).",
+  "dependencies": {
+    "web-push": "3.6.7"
+  }
+}

@@ -1,6 +1,6 @@
 // Service worker: deixa o app funcionando offline.
 // Sempre que publicar uma nova versão, aumente o número abaixo.
-const CACHE = 'financas-v23';
+const CACHE = 'financas-v24';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -37,4 +37,21 @@ self.addEventListener('fetch', (e) => {
       })
       .catch(() => caches.match(e.request).then((r) => r || caches.match('./index.html')))
   );
+});
+
+// Notificações (lembretes enviados pelo servidor uma vez por dia).
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data.json(); } catch (_) { d = { body: e.data ? e.data.text() : '' }; }
+  e.waitUntil(self.registration.showNotification(d.title || 'Organização Financeira', {
+    body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'lembrete', data: { url: d.url || './' },
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = new URL((e.notification.data && e.notification.data.url) || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((janelas) => {
+    for (const j of janelas) { if ('focus' in j) { if (j.navigate) j.navigate(url); return j.focus(); } }
+    return self.clients.openWindow(url);
+  }));
 });
