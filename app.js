@@ -38,12 +38,22 @@ let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){ if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; S.v = 2; }
 migrar();
+// Tema: 'auto' segue o celular; 'claro' e 'escuro' forçam.
+function aplicarTema(){
+  const r = document.documentElement, t = S.tema || 'auto';
+  if (t==='claro') r.dataset.theme = 'light'; else if (t==='escuro') r.dataset.theme = 'dark'; else delete r.dataset.theme;
+  const escuro = t==='escuro' || (t==='auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+  document.querySelectorAll('meta[name="theme-color"]').forEach(m=>m.setAttribute('content', escuro ? '#0b2a28' : '#0b3b3a'));
+}
+aplicarTema();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', aplicarTema);
 function salvar(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){ toast('Não foi possível salvar no aparelho'); } }
 
 const hoje = new Date();
 let cur = { y: hoje.getFullYear(), m: hoje.getMonth() };   // mês aberto
 let aba = 'resumo', subLanc = 'gastos';
-let evoSel = null;   // mês destacado no gráfico de evolução
+let evoSel = null;
+let busca = '';      // texto da busca em Lançamentos   // mês destacado no gráfico de evolução
 
 /* ---------- utilidades ---------- */
 const brl = (n) => (n<0?'-':'') + 'R$ ' + Math.abs(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -275,8 +285,8 @@ function telaResumo(){
   html += `<section class="card"><h3>Fluxo de contas <small>${brl(C.contasPlan)} planejado</small></h3>`;
   if (tot>0){
     const pp = C.contasPagas/tot*100;
-    html += `<div class="split"><div style="width:${pp}%;background:var(--teal)"></div><div style="width:${100-pp}%;background:#f2c1c3"></div></div>
-    <div class="legend"><span><i style="background:var(--teal)"></i>Pagas ${brl(C.contasPagas)}</span><span><i style="background:#f2c1c3"></i>Pendentes ${brl(C.contasPend)}</span></div>`;
+    html += `<div class="split"><div style="width:${pp}%;background:var(--teal)"></div><div style="width:${100-pp}%;background:var(--pend)"></div></div>
+    <div class="legend"><span><i style="background:var(--teal)"></i>Pagas ${brl(C.contasPagas)}</span><span><i style="background:var(--pend)"></i>Pendentes ${brl(C.contasPend)}</span></div>`;
   } else html += `<div class="note">Nenhuma conta cadastrada neste mês.</div>`;
   html += `</section>`;
   return html;
@@ -447,9 +457,12 @@ function previsaoMeta(alvo, total, campo){
   return `<div class="gprev">📅 No seu ritmo (${brl0(media)}/mês), você chega lá em <b>${MESES[quando.m].toLowerCase()} de ${quando.y}</b>${n>1?` (${n} meses)`:''}.</div>`;
 }
 
+const ICON_BUSCA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
 function telaLanc(){
   const M = mes(cur.y,cur.m), C = calc(cur.y,cur.m);
-  let h = `<div class="seg">
+  let h = `<div class="busca">${ICON_BUSCA}<input id="fBusca" type="search" enterkeyhint="search" placeholder="Buscar em todos os meses" value="${esc(busca)}" autocomplete="off"><button class="x" data-act="limparBusca" aria-label="Limpar busca" ${busca?'':'hidden'}>×</button></div>
+  <div id="resBusca">${busca ? resultadosBusca(busca) : ''}</div><div id="lancNormal" ${busca?'hidden':''}>`;
+  h += `<div class="seg">
     <button class="${subLanc==='entradas'?'on':''}" data-sub="entradas">Entradas</button>
     <button class="${subLanc==='gastos'?'on':''}" data-sub="gastos">Gastos</button>
     <button class="${subLanc==='reservas'?'on':''}" data-sub="reservas">Reservas</button></div>`;
@@ -481,7 +494,35 @@ function telaLanc(){
     if (!M.reservas.length) h += vazio('🛟','Nada reservado neste mês','Guarde para a reserva, para a meta ou invista.');
     h += `</div>`;
   }
-  return h;
+  return h + `</div>`;
+}
+
+// Busca em todos os meses: descrição, nome, categoria, forma de pagamento ou valor.
+const semAcento = (t) => String(t||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+function resultadosBusca(q){
+  const termo = semAcento(q.trim());
+  const num = parseValor(q);
+  const bate = (textos, valor) => textos.some(t=>semAcento(t).includes(termo)) || (num>0 && /^[\d.,\sR$]+$/.test(q.trim()) && Math.abs(valor-num)<0.005);
+  const res = [];
+  Object.keys(S.meses).sort().reverse().forEach(k=>{
+    const M = S.meses[k];
+    M.gastos.forEach(g=>{ if (bate([g.desc, nomeCat(g.cat), g.forma], g.valor)) res.push({ k, tipo:'gastos', it:g, ic:emojiCat(g.cat), t:g.desc||nomeCat(g.cat),
+      s:`${nomeCat(g.cat)} · ${g.forma}${ehParcelado(g)?` · ${g.parcelas}x`:''}${g.data?' · '+fmtData(g.data):''}`, v:-g.valor, d:g.data||k }); });
+    M.entradas.forEach(e=>{ if (bate([e.nome,'entrada'], e.valor)) res.push({ k, tipo:'entradas', it:e, ic:'💰', t:e.nome, s:`Entrada${e.data?' · '+fmtData(e.data):''}`, v:e.valor, d:e.data||k }); });
+    M.contas.forEach(c=>{ if (bate([c.nome,'conta'], c.pago?c.valor:c.planejado)) res.push({ k, tipo:'contas', it:c, ic:'📄', t:c.nome, s:c.pago?`Conta paga${c.data?' em '+fmtData(c.data):''}`:'Conta pendente', v:-(c.pago?c.valor:c.planejado), d:c.data||k }); });
+    M.reservas.forEach(r=>{ if (bate([r.nome, r.tipo], r.valor)) res.push({ k, tipo:'reservas', it:r, ic:r.tipo==='Reserva de emergência'?'🛟':r.tipo==='Meta'?'🎯':'📈', t:r.nome||r.tipo, s:`${r.tipo}${r.data?' · '+fmtData(r.data):''}`, v:-r.valor, d:r.data||k }); });
+  });
+  if (!res.length) return vazio('🔎','Nada encontrado',`Nenhum lançamento com “${esc(q)}”.`);
+  res.sort((a,b)=>b.d.localeCompare(a.d));
+  const gastos = res.filter(x=>x.tipo==='gastos'||x.tipo==='contas');
+  let h = `<div class="totalrow"><span>${res.length} resultado${res.length>1?'s':''}</span>${gastos.length?`<span>Gastos: <b class="num">${brl(-soma(gastos,x=>x.v))}</b></span>`:''}</div><div class="list">`;
+  let ultimo = '';
+  res.slice(0,150).forEach(x=>{
+    if (x.k!==ultimo){ ultimo = x.k; const o = ymDe(x.k); h += `<div class="res-mes">${MESES[o.m]} ${o.y}</div>`; }
+    h += `<button class="item" data-edit="${x.tipo}" data-id="${x.it.id}" data-mk="${x.k}"><div class="ic">${x.ic}</div><div class="tx"><div class="t1">${esc(x.t)}</div><div class="t2">${esc(x.s)}</div></div><div class="val num ${x.v>0?'up':''}">${brl(Math.abs(x.v))}</div></button>`;
+  });
+  if (res.length>150) h += `<div class="empty">Mostrando os 150 mais recentes. Refine a busca.</div>`;
+  return h + `</div>`;
 }
 const vazio = (e,t,s) => `<div class="empty"><div class="e">${e}</div><b>${t}</b><div>${s}</div></div>`;
 
@@ -524,7 +565,11 @@ function telaAjustes(){
   const p = S.perfil;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  return `<section class="card"><h3>Perfil</h3>
+  const tema = S.tema || 'auto';
+  return `<section class="card"><h3>Aparência</h3>
+    <div class="temas">${[['auto','Automático'],['claro','☀️ Claro'],['escuro','🌙 Escuro']].map(([v,l])=>`<button class="${tema===v?'on':''}" data-act="tema" data-v="${v}">${l}</button>`).join('')}</div>
+    <p class="note">Automático segue o modo claro/escuro do seu celular.</p></section>
+  <section class="card"><h3>Perfil</h3>
     <div class="f"><label>Quero ser chamado(a) de</label><input id="pNome" value="${esc(p.nome)}"></div>
     <div class="f"><label>Meus pronomes são</label><select id="pPron">${['Masculinos','Femininos','Neutros'].map(o=>`<option ${o===p.pronome?'selected':''}>${o}</option>`).join('')}</select></div>
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
@@ -722,7 +767,8 @@ document.addEventListener('click', e=>{
     salvar(); render(); return;
   }
   const a = t.dataset.act;
-  if (a==='prev'){ cur = prevYM(cur.y,cur.m); evoSel=null; render(); }
+  if (a==='limparBusca'){ busca=''; render(); }
+  else if (a==='prev'){ cur = prevYM(cur.y,cur.m); evoSel=null; render(); }
   else if (a==='next'){ cur = nextYM(cur.y,cur.m); evoSel=null; render(); }
   else if (a==='add'){ abrirForm(aba==='contas'?'contas': aba==='lanc'?subLanc:'gastos'); }
   else if (a==='addConta'){ abrirForm('contas'); }
@@ -763,6 +809,7 @@ document.addEventListener('click', e=>{
     S.perfil.nome = document.getElementById('pNome').value.trim(); S.perfil.pronome = document.getElementById('pPron').value;
     salvar(); render(); toast('Perfil salvo ✓');
   }
+  else if (a==='tema'){ S.tema = t.dataset.v; salvar(); aplicarTema(); render(); }
   else if (a==='carry'){ S.carry=!S.carry; salvar(); render(); }
   else if (a==='instalar'){
     if (deferredPrompt){ deferredPrompt.prompt(); deferredPrompt.userChoice.finally(()=>{deferredPrompt=null;}); }
@@ -795,7 +842,16 @@ document.addEventListener('click', e=>{
   }
 });
 
-document.addEventListener('input', e=>{ if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas(); });
+document.addEventListener('input', e=>{
+  if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
+  if (e.target.id==='fBusca'){
+    busca = e.target.value;
+    memo = {}; memoParc = null;
+    document.getElementById('resBusca').innerHTML = busca.trim() ? resultadosBusca(busca) : '';
+    document.getElementById('lancNormal').hidden = !!busca.trim();
+    document.querySelector('.busca .x').hidden = !busca;
+  }
+});
 document.addEventListener('change', e=>{
   if (e.target.id==='fParc') return infoParcelas();
   if (e.target.id!=='fileImp' || !e.target.files[0]) return;
