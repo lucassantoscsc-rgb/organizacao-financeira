@@ -150,6 +150,102 @@ nav .fab svg{width:26px;height:26px}
 .toast{position:fixed;left:50%;bottom:calc(96px + var(--safe-b));transform:translateX(-50%);background:var(--ink);color:#fff;
   padding:10px 16px;border-radius:12px;font-size:14px;z-index:60;opacity:0;transition:.25s;pointer-events:none}
 .toast.show{opacity:1}
+
+/* alertas */
+.alert.info{background:#eef6f5;color:var(--deep)}
+.alert.info b{color:var(--deep)}
+button.alert{width:100%;text-align:left;font:inherit;font-size:14px}
+.alert.warnbox{background:var(--warn-soft)}
+.alert.crit{background:#fde8e8;color:#7f1d1d}.alert.crit b{color:#7f1d1d}
+.tag.warn{background:var(--warn-soft);color:#8a5a12}
+.muted{color:var(--muted);font-weight:400}
+
+/* previsão do mês */
+.prev{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.prev div{display:flex;flex-direction:column;gap:1px}
+.prev span{font-size:13px;color:var(--muted)}
+.prev b{font-size:19px;letter-spacing:-.02em}
+.prev b.neg{color:var(--bad)}
+.prev small{font-size:12px;color:var(--muted)}
+.hero .eq+.eq{margin-top:4px}
+.prev+.eq{margin-top:10px}
+
+/* gráfico de categorias (barras horizontais) */
+.hbars{display:flex;flex-direction:column;gap:4px}
+.hb{display:grid;grid-template-columns:1fr auto;gap:5px 10px;align-items:center;padding:7px 4px;border-radius:10px;width:100%;text-align:left;font-size:14px}
+.hb:active{background:#f3f8f7}
+.hb-l{display:flex;align-items:center;gap:6px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb-e{font-size:15px}
+.hb-v{font-weight:600}.hb-v small{color:var(--muted);font-weight:500;margin-left:2px}
+.hb-t{grid-column:1/3;height:8px;border-radius:4px;background:#eef3f2;overflow:hidden}
+.hb-t span{display:block;height:100%;border-radius:4px;background:var(--teal)}
+.ess{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:10px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.dot.ok{background:var(--teal)}.dot.no{background:#c3d3d0}
+
+/* orçamentos */
+.meter{display:block;width:100%;text-align:left;margin-bottom:14px;font-size:14px}
+.meter .row{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px}
+.meter .row span{color:var(--muted)}
+.meter .bar{display:block}
+.meter .bar span{display:block;height:100%;border-radius:99px;background:var(--teal)}
+.meter.warn .bar span{background:var(--warn)}
+.meter.crit .bar span{background:var(--bad)}
+.meter .foot{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:5px}
+.meter.warn .foot span:first-child{color:#8a5a12;font-weight:600}
+.meter.crit .foot span:first-child{color:var(--bad);font-weight:600}
+.orclist{display:flex;flex-direction:column}
+.orc{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.orc .lbl{display:flex;flex-direction:column;font-size:15px}
+.orc .lbl small{font-size:12px;color:var(--muted)}
+.orc input{width:120px;padding:10px 12px;border:1.5px solid var(--line);border-radius:10px;background:#fbfdfc;font-size:16px;text-align:right;outline:none}
+.orc input:focus{border-color:var(--mint)}
+
+/* gráfico de evolução */
+.evo{width:100%;height:auto;display:block;overflow:visible}
+.evo .grid-l{stroke:#e8efed;stroke-width:1}
+.evo .axis-l{stroke:#c9d6d3;stroke-width:1}
+.evo .b-ent{fill:#1baf7a}
+.evo .b-sai{fill:#eb6834}
+.evo .hit{fill:transparent;cursor:pointer}
+.evo .evo-g.on .hit{fill:#f1f6f5}
+.evo .lbl-m{font-size:11px;fill:var(--muted);font-family:inherit}
+.evo .evo-g.on .lbl-m{fill:var(--ink);font-weight:700}
+.evo .b-cat{fill:#9fc9c3}.evo .b-cat.on{fill:var(--teal)}
+.evo .lim-l{stroke:var(--bad);stroke-width:1.5;stroke-dasharray:4 3}
+.limkey{display:inline-block;width:12px;border-top:2px dashed var(--bad);margin-right:5px;vertical-align:3px}
+.evo .lbl-v{font-size:10.5px;fill:var(--muted);font-weight:600}
+.legend .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.sw.ent{background:#1baf7a}.sw.sai{background:#eb6834}
+.evo-info{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--muted);background:#f6faf9;border-radius:12px;padding:10px 12px;margin-top:8px}
+.evo-info>b{color:var(--ink);width:100%}
+.evo-info span b{color:var(--ink)}.evo-info b.neg{color:var(--bad)}
+
+/* detalhe da categoria */
+.kpis{display:flex;gap:10px;margin-bottom:12px}
+.kpis div{flex:1;background:#f6faf9;border-radius:12px;padding:10px 12px;display:flex;flex-direction:column}
+.kpis span{font-size:12px;color:var(--muted)}.kpis b{font-size:16px}
+.sub-h{font-size:14px;margin:16px 0 8px}
+.list.flat{box-shadow:none;border:1px solid var(--line)}
+.inline{display:flex;gap:8px}.inline input{flex:1}.inline .btn{width:auto;padding:0 20px}
+.gprev{font-size:12.5px;color:var(--muted);margin-top:6px;line-height:1.35}
+.gprev b{color:var(--ink)}.gprev.ok{color:var(--good);font-weight:600}
+
+/* formulário de gasto rápido */
+.seg.sm{margin:0 0 14px}.seg.sm button{padding:7px 4px;font-size:13px}
+.f .money.big{font-size:30px;text-align:center;padding:14px;letter-spacing:-.02em}
+.chips.rec{flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.chips.rec::-webkit-scrollbar{display:none}
+.chips.rec button{white-space:nowrap;background:var(--mint-soft);color:var(--deep)}
+.catgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.catgrid button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 2px;border-radius:12px;background:#f3f7f6;font-size:11px;font-weight:600;color:var(--muted);line-height:1.15;text-align:center;border:1.5px solid transparent}
+.catgrid button span{font-size:20px}
+.catgrid button.on{background:var(--mint-soft);border-color:var(--teal);color:var(--deep)}
+details.mais{margin:2px 0 14px}
+.sheet>.btn.pri{position:sticky;bottom:calc(-20px - var(--safe-b));box-shadow:0 -10px 16px 6px #fff;z-index:2}
+details.mais summary{font-size:14px;font-weight:600;color:var(--teal);cursor:pointer;padding:6px 0 10px;list-style:none}
+details.mais summary::before{content:"+ "}
+details.mais[open] summary::before{content:"− "}
 </style>
 </head>
 <body>
