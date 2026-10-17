@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 19;
+const APP_VERSAO = 20;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -237,8 +237,8 @@ async function digitoPin(d){
     if (pin !== pinPrimeiro) return setTimeout(() => telaPin('criar', 'As senhas não batem. Tente de novo.'), 300);
     const sal = b64(crypto.getRandomValues(new Uint8Array(16)));
     S.seguranca = { ...(S.seguranca||{}), sal, hash: await hashSenha(pin, sal) }; salvar(); fecharTrava(); render();
-    toast('Senha criada ✓');
-    if (await bioDisponivel() && confirm('Quer destravar também com Face ID ou digital?')) { try { await bioCadastrar(); toast('Face ID/digital ativado ✓'); } catch(e){ toast('Não foi possível ativar agora.'); } render(); }
+    // O Face ID precisa ser pedido direto de um toque (o iPhone bloqueia depois de outras janelas), então só indicamos a chave.
+    toast(await bioDisponivel() ? 'Senha criada ✓ Para usar Face ID/digital, ligue a opção logo abaixo.' : 'Senha criada ✓');
     return;
   }
   // destravar
