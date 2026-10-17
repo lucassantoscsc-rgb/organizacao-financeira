@@ -1,7 +1,9 @@
 {
-  "versao": 15,
+  "versao": 16,
   "novidades": [
-    "O app agora se atualiza sozinho e avisa quando houver versão nova.",
-    "Depois de cada atualização, você vê aqui o que mudou."
+    "🐷 Cofrinhos: crie várias metas (viagem, carro, reserva…) com prazo, e veja quanto guardar por mês.",
+    "✨ Lançar por frase: escreva ou fale “gastei 45 no ifood no crédito” e o app preenche tudo.",
+    "🎬 Retrospectiva do mês: um resumo divertido do seu mês, com título e imagem para compartilhar.",
+    "🔥 Conquistas e sequência de dias anotando. Veja suas medalhas em Planejar."
   ]
 }

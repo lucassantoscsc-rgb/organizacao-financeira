@@ -8,6 +8,8 @@ const CONFIG = {
   // true = pede o e-mail da compra (ou código) na primeira abertura.
   // A conferência é feita no servidor (api/liberar.js).
   exigirCodigo: true,
+  // Link que aparece na imagem da retrospectiva compartilhada (ex.: sua página de vendas). Vazio = só o nome do app.
+  linkDivulgacao: '',
   frases: [
     'Pequenas ações geram grandes resultados.',
     'Quem anota, controla. Quem controla, conquista.',
@@ -18,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 15;
+const APP_VERSAO = 16;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -31,6 +33,8 @@ const ESSENCIAIS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','⛽ Gasolina','
 const CAT_CONTAS = '📄 Contas fixas';
 const FORMAS = ['Pix / Dinheiro','Débito','Crédito'];
 const TIPOS_RES = ['Reserva de emergência','Meta','Renda Fixa','Renda Variável','Outros'];
+const TIPOS_INVEST = ['Renda Fixa','Renda Variável','Outros'];
+const EMOJIS_COF = ['🎯','🛟','🏖️','✈️','🚗','🏠','💍','🎓','🎄','💻','📱','🐷'];
 
 /* ---------- estado ---------- */
 function novoEstado(){
@@ -42,6 +46,14 @@ let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
   if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; S.v = 2;
+  // Cofrinhos: a meta e a reserva de emergência antigas viram os dois primeiros.
+  if (!S.cofrinhos){
+    S.cofrinhos = [];
+    const p = S.perfil || {}, usados = new Set();
+    Object.values(S.meses).forEach(M => M.reservas.forEach(r => usados.add(r.tipo)));
+    if (p.reservaMeta > 0 || usados.has('Reserva de emergência')) S.cofrinhos.push({ id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:p.reservaMeta||0, prazo:'' });
+    if (p.metaValor > 0 || usados.has('Meta')) S.cofrinhos.push({ id:'meta', nome:p.metaNome||'Minha meta', emoji:'🎯', alvo:p.metaValor||0, prazo:'' });
+  }
   // Quem já usava antes do lembrete de backup: conta os lançamentos existentes como "sem backup".
   if (S.novosDesdeBackup == null) S.novosDesdeBackup = S.ultimoBackup ? 0 :
     Object.values(S.meses).reduce((a,M)=>a+M.entradas.length+M.gastos.length+M.contas.length+M.reservas.length, 0);
@@ -150,6 +162,349 @@ function aplicarRecorrentes(y,m){
   salvar();
 }
 
+/* ---------- sequência e conquistas ---------- */
+// Dias em que a pessoa lançou algo (para a sequência 🔥).
+function registrarDiaAtivo(){
+  const d = dataHoje(); S.diasAtivos = S.diasAtivos || [];
+  if (!S.diasAtivos.includes(d)){ S.diasAtivos.push(d); S.diasAtivos = S.diasAtivos.slice(-400); }
+}
+const diaAnterior = (d) => { const x = new Date(d+'T12:00:00'); x.setDate(x.getDate()-1); return key(x.getFullYear(),x.getMonth())+'-'+String(x.getDate()).padStart(2,'0'); };
+function sequenciaAtual(){
+  const set = new Set(S.diasAtivos||[]); let d = dataHoje();
+  if (!set.has(d)) d = diaAnterior(d);
+  let n = 0; while (set.has(d)){ n++; d = diaAnterior(d); }
+  return n;
+}
+function maiorSequencia(){
+  const dias = [...new Set(S.diasAtivos||[])].sort(); let maior = 0, atual = 0, ant = null;
+  dias.forEach(d => { atual = (ant && diaAnterior(d) === ant) ? atual+1 : 1; maior = Math.max(maior, atual); ant = d; });
+  return maior;
+}
+const CONQUISTAS = [
+  { id:'primeiro', e:'✍️', t:'Primeiro passo', d:'Fez o primeiro lançamento', ok:x=>x.total>=1 },
+  { id:'seq3', e:'🔥', t:'Pegando o ritmo', d:'3 dias seguidos anotando', ok:x=>x.seq>=3 },
+  { id:'seq7', e:'⚡', t:'Semana firme', d:'7 dias seguidos anotando', ok:x=>x.seq>=7 },
+  { id:'seq30', e:'🏆', t:'Hábito de ferro', d:'30 dias seguidos anotando', ok:x=>x.seq>=30 },
+  { id:'cofrinho', e:'🐷', t:'Cofrinho inaugurado', d:'Guardou dinheiro num cofrinho', ok:x=>x.guardou },
+  { id:'meta', e:'🎯', t:'Meta batida!', d:'Completou um cofrinho', ok:x=>x.metaBatida },
+  { id:'azul', e:'💙', t:'Mês no azul', d:'Fechou um mês sem ficar no vermelho', ok:x=>x.mesAzul },
+  { id:'orcamento', e:'📏', t:'Dentro do orçamento', d:'Fechou um mês sem estourar nenhum orçamento', ok:x=>x.orcOk },
+  { id:'contas', e:'✅', t:'Contas em dia', d:'Pagou todas as contas de um mês', ok:x=>x.contasDia },
+  { id:'cem', e:'💯', t:'Anotador profissional', d:'Fez 100 lançamentos', ok:x=>x.total>=100 },
+  { id:'backup', e:'💾', t:'Dados protegidos', d:'Fez um backup', ok:()=>!!S.ultimoBackup },
+  { id:'retro', e:'🎬', t:'Olhando para trás', d:'Viu uma retrospectiva do mês', ok:()=>Object.keys(S.retroVistas||{}).length>0 },
+];
+function contextoConquistas(){
+  memo = {}; memoParc = null;
+  const kh = chaveHoje(), ks = Object.keys(S.meses).sort();
+  let total = 0, guardou = false, mesAzul = false, orcOk = false, contasDia = false;
+  const orc = Object.entries(S.orcamentos||{}).filter(([,l])=>l>0);
+  ks.forEach(k => {
+    const M = S.meses[k]; total += M.entradas.length + M.gastos.length + M.contas.length + M.reservas.length;
+    if (M.reservas.some(r => cofDe(r) && r.valor > 0)) guardou = true;
+    if (M.contas.length >= 3 && M.contas.every(c => c.pago)) contasDia = true;
+    if (k < kh && temDados(M)){
+      const o = ymDe(k), C = calc(o.y, o.m);
+      if (C.consumo > 0 && C.restante >= 0) mesAzul = true;
+      if (orc.length && C.consumo > 0 && orc.every(([c,l]) => (C.cats[c]||0) <= l)) orcOk = true;
+    }
+  });
+  const metaBatida = S.cofrinhos.some(c => c.alvo > 0 && guardadoAte(c.id, '9999-12') >= c.alvo);
+  return { total, seq:maiorSequencia(), guardou, metaBatida, mesAzul, orcOk, contasDia };
+}
+// Confere e comemora conquistas novas.
+let conqPendente = false;
+function checarConquistas(){
+  if (!S.liberado || !S.perfil.ok || tour !== null) return;
+  // Espera janelas abertas (novidades, formulários, retrospectiva) fecharem.
+  if ($ov.classList.contains('open') || retro){ conqPendente = true; return; }
+  S.conquistas = S.conquistas || {};
+  const x = contextoConquistas();
+  const novas = CONQUISTAS.filter(c => !S.conquistas[c.id] && c.ok(x));
+  if (!novas.length) return;
+  novas.forEach(c => S.conquistas[c.id] = dataHoje()); salvar();
+  let el = document.getElementById('conq'); if (el) el.remove();
+  el = document.createElement('button'); el.id = 'conq'; el.setAttribute('role','status');
+  el.innerHTML = `<span class="c-top">🏅 ${novas.length>1 ? novas.length+' conquistas desbloqueadas!' : 'Conquista desbloqueada!'}</span>
+    ${novas.slice(0,3).map(c=>`<span class="c-item"><span class="c-e">${c.e}</span><span><b>${c.t}</b><small>${c.d}</small></span></span>`).join('')}
+    ${novas.length>3?`<span class="c-mais">e mais ${novas.length-3}… veja em Planejar</span>`:''}`;
+  el.onclick = () => el.remove();
+  document.body.appendChild(el);
+  setTimeout(() => el.classList.add('sai'), 4200); setTimeout(() => el.remove(), 4700);
+}
+function cardConquistas(){
+  const feitas = S.conquistas || {}, n = CONQUISTAS.filter(c=>feitas[c.id]).length, seq = sequenciaAtual();
+  return `<section class="card" id="cardConquistas"><h3>Conquistas <small>${n} de ${CONQUISTAS.length}</small></h3>
+    <div class="seqbox"><span class="fogo">🔥</span><div><b>${seq} dia${seq===1?'':'s'} seguido${seq===1?'':'s'}</b><small>Recorde: ${maiorSequencia()} · anote algo todo dia para manter a sequência</small></div></div>
+    <div class="medalhas">${CONQUISTAS.map(c=>`<div class="med ${feitas[c.id]?'on':''}" title="${esc(c.d)}"><span class="m-e">${c.e}</span><b>${c.t}</b><small>${feitas[c.id]?'Conquistada em '+fmtData(feitas[c.id])+'/'+feitas[c.id].slice(2,4):c.d}</small></div>`).join('')}</div></section>`;
+}
+
+/* ---------- retrospectiva do mês ---------- */
+const DIAS_SEMANA = ['domingo','segunda-feira','terça-feira','quarta-feira','quinta-feira','sexta-feira','sábado'];
+const TITULO_CAT = {
+  '🍗 Alimentação':['🍔','Lenda do Delivery','Comer bem foi prioridade este mês.'],
+  '🧺 Mercado':['🧺','Chef da Casa','O mercado foi seu destino favorito.'],
+  '🎉 Lazer':['🎉','Espírito Livre','Viver também é importante!'],
+  '📦 Compras Online':['📦','Fã de Frete Grátis','O entregador já sabe seu nome.'],
+  '⛽ Gasolina':['🚗','Estrada é Vida','Você rodou bastante este mês.'],
+  '🚗 Transporte':['🚗','Estrada é Vida','Você rodou bastante este mês.'],
+  '💊 Saúde':['💊','Saúde em Primeiro Lugar','Cuidar de si é o melhor investimento.'],
+  '💄 Beleza':['💄','Autoestima em Dia','Se cuidar faz parte.'],
+  '🐾 Pets':['🐾','Amor de Pet','Seu pet é bem cuidado!'],
+  '📚 Educação':['📚','Investindo em Você','Conhecimento nunca é demais.'],
+  '📱 Assinaturas':['📺','Maratona Infinita','As assinaturas pesaram no mês.'],
+  '👕 Vestuário':['👕','Ícone de Estilo','O guarda-roupa agradece.'],
+  '🎁 Presentes':['🎁','Coração Generoso','Você presenteou bastante gente.'],
+};
+function dadosRetro(y, m){
+  const k = key(y,m), M = S.meses[k];
+  if (!M || k >= chaveHoje()) return null;
+  memo = {}; memoParc = null;
+  const C = calc(y,m);
+  const nLanc = M.entradas.length + M.gastos.length + M.contas.length + M.reservas.length;
+  if (C.consumo <= 0 || nLanc < 5) return null;
+  const itens = [...M.gastos.filter(g=>!ehParcelado(g)).map(g=>({ d:g.desc||nomeCat(g.cat), cat:g.cat, v:+g.valor, data:g.data })),
+    ...parcelasDoMes(y,m).map(x=>({ d:x.g.desc||nomeCat(x.g.cat), cat:x.g.cat, v:x.valor, data:x.g.data })),
+    ...M.contas.filter(c=>c.pago).map(c=>({ d:c.nome, cat:CAT_CONTAS, v:+c.valor, data:c.data }))];
+  // Categoria campeã e título olham os gastos do dia a dia (contas fixas e parcelas ficam de fora, senão o aluguel sempre ganha).
+  const todas = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const variaveis = todas.filter(([c])=>![CAT_CONTAS,'🧾 Contas','🧾 Parcela'].includes(c));
+  const cats = variaveis.length ? variaveis : todas;
+  const totVar = soma(cats, x=>x[1]);
+  const maior = [...itens].sort((a,b)=>b.v-a.v)[0];
+  const p = prevYM(y,m), pk = key(p.y,p.m);
+  const ant = temDados(S.meses[pk]) ? calc(p.y,p.m).consumo : null;
+  const porDia = [0,0,0,0,0,0,0]; itens.forEach(i => { if (i.data) porDia[new Date(i.data+'T12:00:00').getDay()] += i.v; });
+  const diaTop = porDia.some(v=>v>0) ? porDia.indexOf(Math.max(...porDia)) : null;
+  const diasAnot = new Set([...M.gastos, ...M.entradas, ...M.reservas].map(i=>i.data).filter(Boolean)).size;
+  const guardado = soma(M.reservas.filter(r=>r.valor>0), r=>r.valor);
+  const saldo = C.entradasLanc - C.consumo - C.reservas;
+  const variacao = ant ? (C.consumo - ant) / ant * 100 : null;
+  let titulo;
+  if (C.entradasLanc > 0 && saldo < 0) titulo = ['💪','Sobrevivente do Mês','O mês foi puxado, mas você anotou tudo. Mês que vem é outra história!'];
+  else if (C.entradasLanc > 0 && guardado >= C.entradasLanc*0.2) titulo = ['🐷','Mestre da Poupança',`Você guardou ${(guardado/C.entradasLanc*100).toFixed(0)}% do que entrou. Seu eu do futuro agradece!`];
+  else if (variacao !== null && variacao <= -10) titulo = ['🏆','Mestre da Economia',`Gastou ${Math.abs(variacao).toFixed(0)}% menos que em ${MESES[p.m].toLowerCase()}.`];
+  else titulo = TITULO_CAT[cats[0][0]] || (cats[0][0]===CAT_CONTAS || cats[0][0]==='🏠 Casa' || cats[0][0]==='🧾 Contas' || cats[0][0]==='🧾 Parcela' ? ['🏠','Lar Doce Lar','A casa levou a maior parte — e tudo bem.'] : ['📊','Mestre da Organização','Tudo anotado, tudo sob controle.']);
+  return { y, m, k, C, cats, totVar, maior, ant, variacao, diaTop, diasAnot, nLanc, guardado, saldo, titulo, prevMes:MESES[p.m] };
+}
+let retro = null;
+function abrirRetro(y, m){
+  const d = dadosRetro(y, m); if (!d) return;
+  S.retroVistas = S.retroVistas || {}; S.retroVistas[d.k] = true; salvar();
+  const top = d.cats[0], totCat = d.totVar;
+  const slides = [
+    { cls:'r1', html:`<small>Sua retrospectiva</small><h2>${MESES[d.m]}<br>${d.y}</h2><p>Vamos ver como foi o seu mês?</p><span class="r-dica">Toque para continuar →</span>` },
+    { cls:'r2', html:`<small>O mês em números</small>${d.C.entradasLanc?`<div class="r-lin"><span>Entrou</span><b>${brl(d.C.entradasLanc)}</b></div>`:''}<div class="r-lin"><span>Você gastou</span><b>${brl(d.C.consumo)}</b></div>${d.guardado?`<div class="r-lin"><span>Guardou</span><b>${brl(d.guardado)}</b></div>`:''}
+      ${d.C.entradasLanc?`<p class="r-dest">${d.saldo>=0?`Sobraram <b>${brl(d.saldo)}</b> 🎉`:`Faltaram <b>${brl(-d.saldo)}</b>. Acontece!`}</p>`:''}` },
+    { cls:'r3', html:`<small>Categoria campeã</small><div class="r-emoji">${emojiCat(top[0])}</div><h2>${esc(nomeCat(top[0]))}</h2><p><b>${brl(top[1])}</b> — ${(top[1]/totCat*100).toFixed(0)}% dos seus gastos do dia a dia</p>
+      ${d.cats[1]?`<p class="r-sub">Em seguida: ${d.cats.slice(1,3).map(([c,v])=>`${emojiCat(c)} ${esc(nomeCat(c))}`).join(' e ')}</p>`:''}` },
+    d.maior && { cls:'r4', html:`<small>Maior gasto do mês</small><div class="r-emoji">${d.maior.cat===CAT_CONTAS?'📄':emojiCat(d.maior.cat)}</div><h2>${brl(d.maior.v)}</h2><p>${esc(d.maior.d)}${d.maior.data?` · ${fmtData(d.maior.data)}`:''}</p>` },
+    d.variacao !== null && { cls:'r5', html:`<small>Comparado a ${d.prevMes.toLowerCase()}</small><div class="r-emoji">${d.variacao<=0?'📉':'📈'}</div><h2>${Math.abs(d.variacao).toFixed(0)}% ${d.variacao<=0?'a menos':'a mais'}</h2><p>${d.variacao<=0?'Você gastou menos que no mês anterior. Mandou bem! 👏':'Você gastou mais que no mês anterior. Bora ajustar?'}</p>` },
+    { cls:'r6', html:`<small>Seus hábitos</small><div class="r-lin"><span>Lançamentos</span><b>${d.nLanc}</b></div><div class="r-lin"><span>Dias com anotação</span><b>${d.diasAnot}</b></div>
+      ${d.diaTop!==null?`<p class="r-dest">${DIAS_SEMANA[d.diaTop].charAt(0).toUpperCase()+DIAS_SEMANA[d.diaTop].slice(1)} foi o seu dia de gastar 🛍️</p>`:''}` },
+    { cls:'r7', final:true, html:`<small>Seu título do mês</small><div class="r-emoji grande">${d.titulo[0]}</div><h2>${d.titulo[1]}</h2><p>${d.titulo[2]}</p>
+      <div class="r-acts"><button class="btn pri" data-retro="compartilhar">📤 Compartilhar</button><button class="btn sec" data-retro="fechar">Fechar</button></div><span class="r-priv">A imagem compartilhada não mostra seus valores.</span>` },
+  ].filter(Boolean);
+  retro = { d, slides, i:0 };
+  desenharRetro();
+}
+function desenharRetro(){
+  let el = document.getElementById('retro');
+  if (!el){ el = document.createElement('div'); el.id = 'retro'; el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); document.body.appendChild(el); }
+  const { slides, i } = retro;
+  el.className = slides[i].cls;
+  el.innerHTML = `<div class="r-barras">${slides.map((_,j)=>`<span class="${j<i?'cheia':j===i?'atual':''}"></span>`).join('')}</div>
+    <button class="r-x" data-retro="fechar" aria-label="Fechar">×</button>
+    <div class="r-conteudo" aria-live="polite">${slides[i].html}</div>`;
+}
+function fecharRetro(){ retro = null; const el = document.getElementById('retro'); if (el) el.remove(); render(); checarConquistas(); }
+document.addEventListener('click', e => {
+  if (!retro || !e.target.closest('#retro')) return;
+  e.stopPropagation();
+  const b = e.target.closest('[data-retro]');
+  if (b){ if (b.dataset.retro==='fechar') fecharRetro(); else compartilharRetro(); return; }
+  const { slides } = retro;
+  if (e.clientX < innerWidth * 0.3){ if (retro.i > 0){ retro.i--; desenharRetro(); } }
+  else if (retro.i < slides.length - 1){ retro.i++; desenharRetro(); }
+}, true);
+// Imagem para stories (1080x1920) sem valores em reais.
+function compartilharRetro(){
+  const d = retro.d, cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1920;
+  const g = cv.getContext('2d'), F = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
+  const bg = g.createLinearGradient(0,0,1080,1920); bg.addColorStop(0,'#0b3b3a'); bg.addColorStop(1,'#0f766e'); g.fillStyle = bg; g.fillRect(0,0,1080,1920);
+  g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.75)'; g.font = `600 44px ${F}`; g.fillText('MINHA RETROSPECTIVA', 540, 210);
+  g.fillStyle = '#fff'; g.font = `800 96px ${F}`; g.fillText(`${MESES[d.m]} ${d.y}`, 540, 320);
+  g.font = `260px ${F}`; g.fillText(d.titulo[0], 540, 690);
+  g.font = `800 92px ${F}`; quebra(g, d.titulo[1], 540, 860, 940, 104);
+  g.fillStyle = 'rgba(255,255,255,.85)'; g.font = `500 44px ${F}`; quebra(g, d.titulo[2], 540, 1000, 900, 58);
+  const linhas = [`${emojiCat(d.cats[0][0])}  Categoria campeã: ${nomeCat(d.cats[0][0])}`,
+    d.variacao !== null && d.variacao <= -5 ? `📉  Gastei ${Math.abs(d.variacao).toFixed(0)}% menos que no mês anterior` : null,
+    `📝  ${d.nLanc} lançamentos em ${d.diasAnot} dias`,
+    Object.keys(S.conquistas||{}).length ? `🏅  ${Object.keys(S.conquistas).length} conquistas desbloqueadas` : null].filter(Boolean);
+  g.textAlign = 'left'; g.font = `600 46px ${F}`;
+  linhas.forEach((l,i) => { const y = 1260 + i*120; g.fillStyle = 'rgba(255,255,255,.12)'; arred(g, 90, y-78, 900, 104, 28); g.fill(); g.fillStyle = '#fff'; g.fillText(l, 130, y-10); });
+  g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.8)'; g.font = `700 42px ${F}`; g.fillText('📊 ' + CONFIG.nomeApp, 540, 1790);
+  if (CONFIG.linkDivulgacao){ g.font = `500 34px ${F}`; g.fillText(CONFIG.linkDivulgacao, 540, 1845); }
+  cv.toBlob(b => entregarArquivo(`retrospectiva-${d.k}.png`, b, 'image/png', 'Minha retrospectiva', () => toast('Imagem pronta ✓')), 'image/png');
+}
+function quebra(g, txt, x, y, larg, alt){
+  const pal = txt.split(' '); let lin = '', yy = y;
+  pal.forEach(p => { const t = lin ? lin+' '+p : p; if (g.measureText(t).width > larg && lin){ g.fillText(lin, x, yy); lin = p; yy += alt; } else lin = t; });
+  g.fillText(lin, x, yy);
+}
+function arred(g, x, y, w, h, r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+// Cartão no Resumo: retrospectiva do mês passado (até o dia 10) ou do mês aberto, se já passou.
+function cardRetro(){
+  const kc = key(cur.y,cur.m), kh = chaveHoje();
+  if (kc === kh){
+    if (hoje.getDate() > 10) return '';
+    const p = prevYM(cur.y,cur.m);
+    if ((S.retroVistas||{})[key(p.y,p.m)] || !dadosRetro(p.y,p.m)) return '';
+    return `<button class="retro-card" data-act="retro" data-y="${p.y}" data-m="${p.m}"><span class="rc-e">🎬</span><span><b>Sua retrospectiva de ${MESES[p.m]} está pronta!</b><small>Veja como foi seu mês e descubra seu título</small></span><span class="rc-seta">›</span></button>`;
+  }
+  if (kc < kh && dadosRetro(cur.y,cur.m)) return `<button class="btn sec" data-act="retro" data-y="${cur.y}" data-m="${cur.m}" style="margin-bottom:14px">🎬 Ver retrospectiva de ${MESES[cur.m]}</button>`;
+  return '';
+}
+
+/* ---------- lançar por frase ----------
+   "gastei 45 no ifood no crédito", "recebi 3500 de salário", "guardei 200 na viagem", "mercado 230 em 3x ontem".
+   Funciona offline, por palavras-chave + o histórico de descrições do próprio usuário. */
+const PALAVRAS_CAT = [
+  ['🧺 Mercado', ['mercado','supermercado','feira','atacadao','assai','carrefour','hortifruti','sacolao','acougue','atacarejo','compras do mes']],
+  ['🍗 Alimentação', ['ifood','i food','rappi','restaurante','lanche','lanchonete','pizza','pizzaria','hamburguer','hamburgueria','almoco','jantar','padaria','cafe','sorvete','acai','delivery','marmita','mcdonalds','mc donalds','burger king','comida','salgado','churrasco','sushi']],
+  ['⛽ Gasolina', ['gasolina','posto','combustivel','etanol','abasteci','abastecer','diesel']],
+  ['🚗 Transporte', ['uber','99 pop','onibus','metro','passagem','estacionamento','pedagio','taxi','trem','bilhete unico','oficina','mecanico','lava jato','ipva','seguro do carro','licenciamento']],
+  ['🏠 Casa', ['aluguel','condominio','movel','moveis','reforma','material de construcao','produtos de limpeza','decoracao','iptu','eletrodomestico']],
+  ['💊 Saúde', ['farmacia','remedio','remedios','medico','consulta','dentista','exame','exames','plano de saude','hospital','academia','terapia','psicologo','drogaria']],
+  ['📦 Compras Online', ['amazon','shopee','mercado livre','shein','aliexpress','magalu','temu','compra online','compras online']],
+  ['👕 Vestuário', ['roupa','roupas','tenis','sapato','sapatos','camisa','camiseta','calca','vestido','blusa','bermuda','renner','riachuelo','zara','sandalia','chinelo']],
+  ['🎉 Lazer', ['cinema','show','bar','cerveja','festa','viagem','passeio','balada','ingresso','ingressos','parque','praia','hotel','pousada','boliche','jogo']],
+  ['📚 Educação', ['curso','faculdade','escola','livro','livros','mensalidade da escola','material escolar','apostila','udemy']],
+  ['📱 Assinaturas', ['netflix','spotify','assinatura','prime video','amazon prime','disney','hbo','youtube premium','icloud','globoplay','deezer','chatgpt','streaming']],
+  ['💄 Beleza', ['salao','cabelo','manicure','unha','unhas','maquiagem','barbearia','barbeiro','cosmetico','cosmeticos','perfume','skincare','depilacao','sobrancelha']],
+  ['🐾 Pets', ['pet','racao','veterinario','petshop','pet shop','cachorro','gato','banho e tosa']],
+  ['🎁 Presentes', ['presente','presentes','lembrancinha','aniversario']],
+  ['🧾 Contas', ['conta de luz','luz','energia','conta de agua','agua','internet','telefone','conta do celular','recarga','gas','boleto','conta']],
+  ['🧾 Parcela', ['parcela','emprestimo','financiamento','consorcio','prestacao']],
+];
+const VERBOS_ENTRADA = ['recebi','ganhei','salario','caiu','entrou','vendi','renda','freela','reembolso','pagaram','me pagaram','comissao','bonus','decimo terceiro'];
+const VERBOS_RESERVA = ['guardei','poupei','investi','apliquei','reservei','juntei','depositei no cofrinho'];
+const PALAVRAS_VAZIAS = new Set(['gastei','paguei','comprei','gasto','compra','foi','com','no','na','nos','nas','em','de','do','da','dos','das','um','uma','o','a','os','as','pelo','pela','para','pra','pro','e','reais','real','r$','centavos','hoje','ontem','anteontem','meu','minha','ai','la','que','cartao','via']);
+const normTxt = (t) => semAcento(t).replace(/[^a-z0-9$,.\s]/g,' ').replace(/\s+/g,' ').trim();
+const temPalavra = (txt, w) => new RegExp('(^|\\s)' + w.replace(/[.$]/g,'\\$&') + '(?=\\s|$)').test(txt);
+
+function interpretarFrase(frase){
+  const out = { tipo:'gastos' };
+  let t = ' ' + normTxt(frase) + ' ';
+  const tira = (re) => { t = t.replace(re, ' '); };
+  // parcelas: "em 10x", "10 vezes", "parcelado em 3"
+  let m = t.match(/\s(?:em\s)?(\d{1,2})\s?(?:x|vezes)\s/) || t.match(/\sparcelad[oa]\sem\s(\d{1,2})\s/);
+  if (m){ out.parcelas = +m[1]; out.forma = 'Crédito'; tira(m[0]); }
+  // data
+  const hojeD = new Date();
+  const fmt = (d) => key(d.getFullYear(), d.getMonth()) + '-' + String(d.getDate()).padStart(2,'0');
+  if (/\santeontem\s/.test(t)){ const d = new Date(hojeD); d.setDate(d.getDate()-2); out.data = fmt(d); }
+  else if (/\sontem\s/.test(t)){ const d = new Date(hojeD); d.setDate(d.getDate()-1); out.data = fmt(d); }
+  m = t.match(/\s(?:no\s)?dia\s(\d{1,2})\s/);
+  if (m){ const base = (cur.y===hojeD.getFullYear() && cur.m===hojeD.getMonth()) ? hojeD : new Date(cur.y, cur.m, 1);
+    out.data = key(base.getFullYear(), base.getMonth()) + '-' + String(Math.min(+m[1], diasNoMes(base.getFullYear(), base.getMonth()))).padStart(2,'0'); tira(m[0]); }
+  // valor: "45 reais e 90 centavos", "r$ 1.200,50", "45,90", "2 mil", "1,5 mil"
+  m = t.match(/\s(?:r\$\s?)?(\d+)\s?(?:reais|real)\se\s(\d{1,2})\scentavos?\s/);
+  if (m){ out.valor = +m[1] + (+m[2])/100; tira(m[0]); }
+  else {
+    m = t.match(/\s(?:r\$\s?)?(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)\s?(mil|k)?(?=\s)/);
+    if (m){ let v = m[1]; v = /\.\d{3}/.test(v) ? v.replace(/\./g,'').replace(',','.') : v.replace(',','.');
+      out.valor = Math.round(parseFloat(v) * (m[2] ? 1000 : 1) * 100) / 100; tira(m[0]); }
+  }
+  // forma de pagamento
+  if (/\s(cartao de credito|credito|no cartao)\s/.test(t)){ out.forma = 'Crédito'; tira(/\s(?:no|na|com|pelo|via)?\s?(?:cartao de credito|credito|no cartao)\s/); }
+  else if (/\s(cartao de debito|debito)\s/.test(t)){ out.forma = 'Débito'; tira(/\s(?:no|na|com|pelo|via)?\s?(?:cartao de debito|debito)\s/); }
+  else if (/\s(pix|dinheiro|especie|a vista)\s/.test(t)){ out.forma = 'Pix / Dinheiro'; tira(/\s(?:no|na|com|pelo|via|em)?\s?(?:pix|dinheiro|especie|a vista)\s/); }
+  // tipo: entrada ou reserva
+  if (VERBOS_RESERVA.some(w=>temPalavra(t.trim(), w))){
+    out.tipo = 'reservas';
+    const c = S.cofrinhos.map(c=>({ c, n:normTxt(c.nome) })).filter(x=>x.n && temPalavra(t.trim(), x.n)).sort((a,b)=>b.n.length-a.n.length)[0];
+    if (c) out.cof = c.c.id;
+    else if (/\s(invest|apliq)/.test(t)) out.dest = 'Renda Fixa';
+  } else if (VERBOS_ENTRADA.some(w=>temPalavra(t.trim(), w))) out.tipo = 'entradas';
+  // categoria: primeiro o histórico do usuário, depois as palavras-chave (a mais longa ganha)
+  if (out.tipo === 'gastos'){
+    const tt = t.trim();
+    let melhor = null;
+    Object.values(S.meses).forEach(M => M.gastos.forEach(g => { const d = normTxt(g.desc); if (d.length>=3 && temPalavra(tt, d) && (!melhor || d.length > melhor.n.length)) melhor = { n:d, cat:g.cat, desc:g.desc }; }));
+    if (melhor){ out.cat = melhor.cat; out.desc = melhor.desc; }
+    else {
+      let kw = null;
+      PALAVRAS_CAT.forEach(([cat, ws]) => ws.forEach(w => { if (temPalavra(tt, w) && (!kw || w.length > kw.w.length)) kw = { w, cat }; }));
+      if (kw) out.cat = kw.cat;
+    }
+  }
+  // descrição: o que sobrou, sem palavras de ligação nas pontas
+  if (!out.desc){
+    const verbos = ['gastei','paguei','comprei','recebi','ganhei','guardei','poupei','investi','apliquei','reservei','juntei'];
+    const ponta = (w) => PALAVRAS_VAZIAS.has(w) || verbos.includes(w);
+    const sobra = t.trim().split(' ').filter(Boolean).filter(w => !verbos.includes(w));
+    while (sobra.length && ponta(sobra[0])) sobra.shift();
+    while (sobra.length && ponta(sobra[sobra.length-1])) sobra.pop();
+    // volta para as palavras originais (com acentos)
+    const orig = String(frase).split(/\s+/).map(w => w.replace(/[^\p{L}\p{N}&'-]/gu, '')).filter(Boolean);
+    const normO = orig.map(w => normTxt(w));
+    let j = 0;
+    const d = sobra.map(w => { const i = normO.indexOf(w, j); if (i < 0) return w; j = i + 1; return orig[i]; }).join(' ');
+    if (d && d.length <= 40) out.desc = d.charAt(0).toUpperCase() + d.slice(1);
+  }
+  return out;
+}
+// Preenche o formulário com o que foi entendido da frase.
+function aplicarFrase(frase){
+  if (!frase.trim()) return;
+  const r = interpretarFrase(frase);
+  if (r.tipo !== 'gastos'){
+    abrirForm(r.tipo, null, null, r.tipo==='reservas' ? { cof:r.cof } : null);
+    if (r.tipo==='reservas' && r.dest && !r.cof){ form.v.dest = r.dest; $sh.querySelectorAll('[data-chips="dest"] button').forEach(b=>b.classList.toggle('on', b.dataset.v===r.dest)); }
+  }
+  const set = (id, v) => { const el = document.getElementById(id); if (el && v != null && v !== '') el.value = v; };
+  if (r.valor) set('fValor', moneyVal(r.valor));
+  if (r.data) set('fData', r.data);
+  if (r.tipo === 'entradas') set('fNome', r.desc);
+  if (r.tipo === 'reservas') set('fNome', '');
+  if (r.tipo === 'gastos'){
+    if (r.cat) selecionarCat(r.cat);
+    if (r.forma){ form.v.forma = r.forma; $sh.querySelectorAll('[data-chips="forma"] button').forEach(b=>b.classList.toggle('on', b.dataset.v===r.forma)); document.getElementById('boxParc').hidden = r.forma!=='Crédito'; }
+    if (r.parcelas) set('fParc', String(Math.min(24, r.parcelas)));
+    set('fDesc', r.desc);
+    infoParcelas();
+  }
+  const partes = [r.valor ? brl(r.valor) : null,
+    r.tipo==='entradas' ? 'Entrada' : r.tipo==='reservas' ? (r.cof ? 'Cofrinho ' + (cofPorId(r.cof)||{}).nome : 'Reserva') : r.cat ? nomeCat(r.cat) : null,
+    r.tipo==='gastos' ? r.forma : null, r.parcelas>1 ? r.parcelas+'x' : null, r.data ? fmtData(r.data) : null].filter(Boolean);
+  const info = document.getElementById('fraseInfo');
+  if (info) info.innerHTML = partes.length ? `✓ Entendi: <b>${esc(partes.join(' · '))}</b>${r.tipo==='gastos' && !r.cat ? ' — escolha a categoria' : ''}${!r.valor ? ' — falta o valor' : ''}` : 'Não entendi. Tente algo como “gastei 45 no mercado”.';
+}
+const Reconhecedor = window.SpeechRecognition || window.webkitSpeechRecognition;
+function ouvirFrase(btn){
+  if (!Reconhecedor) return toast('Seu navegador não tem reconhecimento de voz. Use o microfone do teclado.');
+  const r = new Reconhecedor(); r.lang = 'pt-BR'; r.interimResults = false; r.maxAlternatives = 1;
+  btn.classList.add('gravando');
+  r.onresult = (e) => { const txt = e.results[0][0].transcript; const i = document.getElementById('fFrase'); if (i) i.value = txt; aplicarFrase(txt); };
+  r.onerror = (e) => { if (e.error !== 'no-speech' && e.error !== 'aborted') toast(e.error === 'not-allowed' ? 'Permita o uso do microfone para falar.' : 'Não consegui ouvir. Tente de novo.'); };
+  r.onend = () => btn.classList.remove('gravando');
+  try { r.start(); } catch(e){ btn.classList.remove('gravando'); }
+}
+const blocoFrase = () => `<div class="frase"><input id="fFrase" enterkeyhint="done" autocomplete="off" placeholder="✨ Ex.: gastei 45 no ifood no crédito">
+  ${Reconhecedor ? '<button type="button" class="mic" data-act="ouvir" aria-label="Falar">🎤</button>' : ''}</div><div class="frase-info" id="fraseInfo"></div>`;
+
+/* ---------- cofrinhos ----------
+   Cada reserva pode ir para um cofrinho (campo cof). Reservas antigas usam o tipo. Retiradas são valores negativos. */
+const cofDe = (r) => r.cof || (r.tipo==='Reserva de emergência' ? 'reserva' : r.tipo==='Meta' ? 'meta' : null);
+const cofPorId = (id) => S.cofrinhos.find(c=>c.id===id);
+function guardadoNoMes(id, y, m){ return soma(mes(y,m).reservas.filter(r=>cofDe(r)===id), r=>r.valor); }
+function guardadoAte(id, k){
+  let t = 0; Object.entries(S.meses).forEach(([mk,M]) => { if (mk <= k) t += soma(M.reservas.filter(r=>cofDe(r)===id), r=>r.valor); });
+  return t;
+}
+const mesesEntre = (k1, k2) => { const a = ymDe(k1), b = ymDe(k2); return (b.y-a.y)*12 + (b.m-a.m); };
+
 /* ---------- cálculos ---------- */
 let memo = {};
 function primeiraChave(){ const ks = Object.keys(S.meses).filter(k=>temDados(S.meses[k])).sort(); return ks[0]; }
@@ -235,7 +590,7 @@ function render(){
   const telas = { resumo:telaResumo, lanc:telaLanc, contas:telaContas, metas:telaMetas, ajustes:telaAjustes };
   $app.innerHTML = `
     <header class="top ${aba==='resumo'?'hero-top':''}">
-      <div class="hello">Olá, ${esc(p.nome||'você')}!</div>
+      <div class="hello">Olá, ${esc(p.nome||'você')}!${sequenciaAtual()>=1?`<button class="streak" data-tab="metas" aria-label="Sequência de ${sequenciaAtual()} dias">🔥 ${sequenciaAtual()}</button>`:''}</div>
       <div class="sub">${aba==='resumo' ? esc(frase) : saud + ' de volta'}</div>
       <div class="monthbar">
         <button data-act="prev" aria-label="Mês anterior">‹</button>
@@ -272,6 +627,7 @@ function telaResumo(){
     ${blocoPrevisao(C)}
   </section>`;
 
+  html += cardRetro();
   html += dicaTransferir();
   html += lembreteBackup();
   html += alertasContas();
@@ -290,7 +646,7 @@ function telaResumo(){
   html += cardOrcamentos(C);
   html += cardEvolucao();
 
-  html += `<section class="card"><h3>Metas <small>acumulado até ${MESES[cur.m].toLowerCase()}</small></h3>${blocoMetas(C)}</section>`;
+  html += cardCofrinhos(true);
 
   const tot = C.contasPagas + C.contasPend;
   html += `<section class="card"><h3>Fluxo de contas <small>${brl(C.contasPlan)} planejado</small></h3>`;
@@ -469,26 +825,74 @@ function abrirCategoria(c){
     ${c!==CAT_CONTAS?`<div class="f" style="margin-top:14px"><label>Orçamento mensal para ${esc(nomeCat(c))}</label><div class="inline"><input class="num" id="oCat" inputmode="decimal" placeholder="Sem limite" value="${lim?moneyVal(lim):''}"><button class="btn pri" data-act="salvarOrcCat" data-c="${esc(c)}">Salvar</button></div></div>`:''}`);
 }
 
-function blocoMetas(C){
-  const p = S.perfil; let h='';
-  const g = (nome, alvo, total, mesV, campo) => {
-    const pct = alvo>0 ? Math.min(100, total/alvo*100) : 0;
-    return `<div class="goal"><div class="row"><b>${esc(nome)}</b><span class="num">${brl(total)} de ${brl(alvo)}</span></div>
-      <div class="bar"><div style="width:${pct}%"></div></div>
-      <div class="foot num"><span>+${brl(mesV)} este mês</span><span>Faltam ${brl(Math.max(0,alvo-total))} · ${pct.toFixed(0)}%</span></div>${previsaoMeta(alvo,total,campo)}</div>`;
-  };
-  if (p.reservaMeta>0) h += g('🛟 Reserva de emergência', p.reservaMeta, C.acumEmerg, C.resEmerg, 'resEmerg');
-  if (p.metaValor>0) h += g('🎯 '+(p.metaNome||'Minha meta'), p.metaValor, C.acumMeta, C.resMeta, 'resMeta');
-  return h || `<div class="note">Defina sua meta e sua reserva em Planejar.</div>`;
+// Cofrinhos com progresso, quanto guardar por mês (se tiver prazo) ou previsão pelo ritmo.
+function blocoCofrinhos(compacto){
+  const k = key(cur.y,cur.m);
+  if (!S.cofrinhos.length) return `<div class="note" style="margin:0 0 12px">Crie cofrinhos para juntar dinheiro: viagem, carro, reserva de emergência…</div>`;
+  return S.cofrinhos.map(c => {
+    const total = guardadoAte(c.id, k), mesV = guardadoNoMes(c.id, cur.y, cur.m);
+    const pct = c.alvo>0 ? Math.min(100, Math.max(0, total/c.alvo*100)) : 0;
+    return `<button class="goal cof" data-cof="${c.id}"><span class="row"><b>${c.emoji} ${esc(c.nome)}</b><span class="num">${brl(total)}${c.alvo?` de ${brl(c.alvo)}`:''}</span></span>
+      ${c.alvo?`<span class="bar"><span style="width:${pct}%"></span></span>`:''}
+      <span class="foot num"><span>${mesV>=0?'+':''}${brl(mesV)} este mês</span>${c.alvo?`<span>${total>=c.alvo?'Concluído':`Faltam ${brl(c.alvo-total)}`} · ${pct.toFixed(0)}%</span>`:''}</span>
+      ${compacto?'':previsaoCofrinho(c, total)}</button>`;
+  }).join('');
 }
-// Em quanto tempo a meta é atingida, pela média guardada nos últimos 3 meses.
-function previsaoMeta(alvo, total, campo){
-  if (total >= alvo) return `<div class="gprev ok">🎉 Meta atingida!</div>`;
-  let t = 0; for (let i=0;i<3;i++){ const o = somaMeses(cur.y,cur.m,-i); t += calc(o.y,o.m)[campo]; }
+function previsaoCofrinho(c, total){
+  if (!c.alvo) return '';
+  if (total >= c.alvo) return `<span class="gprev ok">🎉 Meta atingida!</span>`;
+  const falta = c.alvo - total, k = key(cur.y,cur.m);
+  if (c.prazo){
+    const n = mesesEntre(k, c.prazo) + 1, o = ymDe(c.prazo);
+    if (n <= 0) return `<span class="gprev">⏰ O prazo (${MES_CURTO[o.m]}/${o.y}) passou. Faltaram ${brl(falta)}.</span>`;
+    return `<span class="gprev">📅 Guarde <b>${brl(falta/n)}/mês</b> para chegar até ${MES_CURTO[o.m]}/${o.y}${n>1?` (${n} meses)`:''}.</span>`;
+  }
+  let t = 0; for (let i=0;i<3;i++){ const o = somaMeses(cur.y,cur.m,-i); t += guardadoNoMes(c.id, o.y, o.m); }
   const media = t/3;
-  if (media <= 0) return `<div class="gprev">Guarde um pouco todo mês para ver a previsão de quando você chega lá.</div>`;
-  const n = Math.ceil((alvo-total)/media), quando = somaMeses(cur.y,cur.m,n);
-  return `<div class="gprev">📅 No seu ritmo (${brl0(media)}/mês), você chega lá em <b>${MESES[quando.m].toLowerCase()} de ${quando.y}</b>${n>1?` (${n} meses)`:''}.</div>`;
+  if (media <= 0) return `<span class="gprev">Guarde um pouco todo mês, ou defina um prazo, para ver a previsão.</span>`;
+  const n = Math.ceil(falta/media), q = somaMeses(cur.y,cur.m,n);
+  return `<span class="gprev">📅 No seu ritmo (${brl0(media)}/mês), você chega lá em <b>${MESES[q.m].toLowerCase()} de ${q.y}</b>.</span>`;
+}
+function cardCofrinhos(compacto){
+  return `<section class="card" id="cardMetas"><h3>Cofrinhos <small>${compacto?'acumulado até '+MESES[cur.m].toLowerCase():''}</small></h3>${blocoCofrinhos(compacto)}
+    ${compacto?'':'<button class="btn sec" data-act="novoCof">+ Novo cofrinho</button>'}</section>`;
+}
+// Detalhe de um cofrinho: progresso, movimentações e ações.
+function abrirCofrinho(id){
+  const c = cofPorId(id); if (!c) return;
+  const k = key(cur.y,cur.m), total = guardadoAte(id, k);
+  const movs = [];
+  Object.keys(S.meses).sort().reverse().forEach(mk => S.meses[mk].reservas.filter(r=>cofDe(r)===id).forEach(r=>movs.push({ mk, r })));
+  abrir(`<h2>${c.emoji} ${esc(c.nome)}</h2>
+    <div class="kpis"><div><span>Guardado</span><b class="num">${brl(total)}</b></div>${c.alvo?`<div><span>Meta</span><b class="num">${brl(c.alvo)}</b></div>`:''}${c.prazo?`<div><span>Prazo</span><b>${MES_CURTO[ymDe(c.prazo).m]}/${ymDe(c.prazo).y}</b></div>`:''}</div>
+    ${previsaoCofrinho(c, total).replace('<span class="gprev','<p class="gprev').replace(/<\/span>$/,'</p>')}
+    <div class="row2" style="margin:14px 0"><button class="btn pri" data-act="guardarCof" data-cof-id="${id}">+ Guardar</button><button class="btn sec" data-act="retirarCof" data-cof-id="${id}">− Retirar</button></div>
+    <h4 class="sub-h">Movimentações</h4>
+    <div class="list flat">${movs.slice(0,30).map(({mk,r})=>`<button class="item" data-edit="reservas" data-id="${r.id}" data-mk="${mk}"><div class="tx"><div class="t1">${r.valor<0?'Retirada':esc(r.nome||'Guardado')}</div><div class="t2">${r.data?fmtData(r.data)+'/'+mk.slice(0,4):MESES[ymDe(mk).m]}</div></div><div class="val num ${r.valor<0?'down':'up'}">${r.valor<0?'−':'+'}${brl(Math.abs(r.valor))}</div></button>`).join('') || '<div class="empty">Nada guardado ainda.</div>'}</div>
+    <button class="btn sec" data-act="editarCof" data-cof-id="${id}" style="margin-top:14px">Editar cofrinho</button>`);
+}
+function editarCofrinho(id){
+  const c = id ? cofPorId(id) : { nome:'', emoji:'🎯', alvo:0, prazo:'' };
+  form = { tipo:'cofrinho', id, v:{ emoji:c.emoji } };
+  abrir(`<h2>${id?'Editar':'Novo'} cofrinho</h2>
+    <div class="f"><label>Nome</label><input id="cNome" placeholder="Ex.: Viagem, Carro, Reserva" value="${esc(c.nome)}"></div>
+    <div class="f"><label>Ícone</label><div class="chips emo" data-chips="emoji">${EMOJIS_COF.map(e=>`<button type="button" class="${e===c.emoji?'on':''}" data-v="${e}">${e}</button>`).join('')}</div></div>
+    <div class="row2"><div class="f"><label>Meta (opcional)</label><input class="num" id="cAlvo" inputmode="decimal" placeholder="0,00" value="${c.alvo?moneyVal(c.alvo):''}"></div>
+    <div class="f"><label>Até quando? (opcional)</label><input type="month" id="cPrazo" value="${c.prazo||''}"></div></div>
+    <button class="btn pri" data-act="salvarCof">Salvar</button>
+    ${id?'<button class="btn dan" data-act="excluirCof">Excluir cofrinho</button>':''}`);
+}
+function salvarCofrinho(){
+  const nome = document.getElementById('cNome').value.trim(); if (!nome) return toast('Dê um nome para o cofrinho');
+  const dados = { nome, emoji:form.v.emoji||'🎯', alvo:parseValor(document.getElementById('cAlvo').value), prazo:document.getElementById('cPrazo').value||'' };
+  if (form.id) Object.assign(cofPorId(form.id), dados); else S.cofrinhos.push({ id:uid(), ...dados });
+  salvar(); fechar(); render(); toast('Cofrinho salvo ✓'); checarConquistas();
+}
+function excluirCofrinho(){
+  const id = form.id, c = cofPorId(id);
+  if (!confirm(`Excluir o cofrinho “${c.nome}”? O dinheiro guardado nele continua nas suas reservas, como “Outros”.`)) return;
+  Object.values(S.meses).forEach(M => M.reservas.forEach(r => { if (cofDe(r)===id){ delete r.cof; r.tipo = 'Outros'; } }));
+  S.cofrinhos = S.cofrinhos.filter(x=>x.id!==id); salvar(); fechar(); render(); toast('Cofrinho excluído');
 }
 
 const ICON_BUSCA = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>';
@@ -524,8 +928,9 @@ function telaLanc(){
   }
   if (subLanc==='reservas'){
     h += `<div class="totalrow"><span>Total reservado/investido</span><b class="num">${brl(C.reservas)}</b></div><div class="list">`;
-    M.reservas.forEach(r=>{ h += `<button class="item" data-edit="reservas" data-id="${r.id}"><div class="ic">${r.tipo==='Reserva de emergência'?'🛟':r.tipo==='Meta'?'🎯':'📈'}</div><div class="tx"><div class="t1">${esc(r.nome||r.tipo)}</div><div class="t2">${esc(r.tipo)}${r.data?' · '+fmtData(r.data):''}</div></div><div class="val num">${brl(r.valor)}</div></button>`; });
-    if (!M.reservas.length) h += vazio('🛟','Nada reservado neste mês','Guarde para a reserva, para a meta ou invista.');
+    M.reservas.forEach(r=>{ const c = cofPorId(cofDe(r));
+      h += `<button class="item" data-edit="reservas" data-id="${r.id}"><div class="ic">${c?c.emoji:'📈'}</div><div class="tx"><div class="t1">${esc(r.nome||(c?c.nome:r.tipo))}</div><div class="t2">${c?(r.valor<0?'Retirada de ':'')+esc(c.nome):esc(r.tipo)}${r.data?' · '+fmtData(r.data):''}</div></div><div class="val num ${r.valor<0?'down':''}">${brl(r.valor)}</div></button>`; });
+    if (!M.reservas.length) h += vazio('🐷','Nada guardado neste mês','Guarde num cofrinho ou registre um investimento.');
     h += `</div>`;
   }
   return h + `</div>`;
@@ -544,7 +949,7 @@ function resultadosBusca(q){
       s:`${nomeCat(g.cat)} · ${g.forma}${ehParcelado(g)?` · ${g.parcelas}x`:''}${g.data?' · '+fmtData(g.data):''}`, v:-g.valor, d:g.data||k }); });
     M.entradas.forEach(e=>{ if (bate([e.nome,'entrada'], e.valor)) res.push({ k, tipo:'entradas', it:e, ic:'💰', t:e.nome, s:`Entrada${e.data?' · '+fmtData(e.data):''}`, v:e.valor, d:e.data||k }); });
     M.contas.forEach(c=>{ if (bate([c.nome,'conta'], c.pago?c.valor:c.planejado)) res.push({ k, tipo:'contas', it:c, ic:'📄', t:c.nome, s:c.pago?`Conta paga${c.data?' em '+fmtData(c.data):''}`:'Conta pendente', v:-(c.pago?c.valor:c.planejado), d:c.data||k }); });
-    M.reservas.forEach(r=>{ if (bate([r.nome, r.tipo], r.valor)) res.push({ k, tipo:'reservas', it:r, ic:r.tipo==='Reserva de emergência'?'🛟':r.tipo==='Meta'?'🎯':'📈', t:r.nome||r.tipo, s:`${r.tipo}${r.data?' · '+fmtData(r.data):''}`, v:-r.valor, d:r.data||k }); });
+    M.reservas.forEach(r=>{ const c = cofPorId(cofDe(r)); if (bate([r.nome, r.tipo, c&&c.nome], r.valor)) res.push({ k, tipo:'reservas', it:r, ic:c?c.emoji:'📈', t:r.nome||(c?c.nome:r.tipo), s:`${c?c.nome:r.tipo}${r.data?' · '+fmtData(r.data):''}`, v:-r.valor, d:r.data||k }); });
   });
   if (!res.length) return vazio('🔎','Nada encontrado',`Nenhum lançamento com “${esc(q)}”.`);
   res.sort((a,b)=>b.d.localeCompare(a.d));
@@ -583,15 +988,9 @@ function telaContas(){
 
 function telaMetas(){
   const C = calc(cur.y,cur.m), p = S.perfil;
-  return `<section class="card" id="cardMetas"><h3>Seu progresso</h3>${blocoMetas(C)}</section>
+  return `${cardCofrinhos(false)}
   ${cardOrcamentos(C)}
-  <section class="card"><h3>Editar metas</h3>
-    <div class="f"><label>Minha meta é</label><input id="mNome" value="${esc(p.metaNome)}" placeholder="Ex.: Carro, Viagem, Casa"></div>
-    <div class="row2"><div class="f"><label>Quanto custa</label><input id="mValor" inputmode="decimal" value="${p.metaValor?p.metaValor.toLocaleString('pt-BR'):''}" placeholder="0,00"></div>
-    <div class="f"><label>Reserva de emergência</label><input id="mRes" inputmode="decimal" value="${p.reservaMeta?p.reservaMeta.toLocaleString('pt-BR'):''}" placeholder="0,00"></div></div>
-    <button class="btn pri" data-act="salvarMetas">Salvar metas</button>
-    <p class="note">Para avançar, lance em Reservas com o tipo “Reserva de emergência” ou “Meta”.</p>
-  </section>
+  ${cardConquistas()}
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
 }
 
@@ -658,7 +1057,7 @@ function telaAjustes(){
 const $ov = document.getElementById('overlay'), $sh = document.getElementById('sheet');
 let form = null;
 function abrir(html){ $sh.innerHTML = '<div class="grab"></div>'+html; $ov.classList.add('open'); const i=$sh.querySelector('input.money'); if(i&&!i.value) setTimeout(()=>i.focus(),250); }
-function fechar(){ $ov.classList.remove('open'); form=null; }
+function fechar(){ $ov.classList.remove('open'); form=null; if (conqPendente){ conqPendente = false; setTimeout(checarConquistas, 400); } }
 $ov.addEventListener('click', e=>{ if(e.target===$ov){ if ($sh.querySelector('.novidades')){ S.versaoVista = APP_VERSAO; salvar(); } fechar(); } });
 
 const dataHoje = () => { const d=new Date(); return key(d.getFullYear(),d.getMonth())+'-'+String(d.getDate()).padStart(2,'0'); };
@@ -675,7 +1074,7 @@ function recentes(){
   return Object.values(cont).sort((a,b)=>b.n-a.n).slice(0,6).map(x=>x.g);
 }
 
-function abrirForm(tipo, id, mk){
+function abrirForm(tipo, id, mk, opcoes){
   const M = mk ? S.meses[mk] : mes(cur.y,cur.m);
   const it = id ? M[tipo].find(x=>x.id===id) : null;
   form = { tipo, id, mk, v:{} };
@@ -693,7 +1092,7 @@ function abrirForm(tipo, id, mk){
   if (tipo==='gastos'){
     form.v = { cat: it?it.cat:'', forma: it?it.forma:'Pix / Dinheiro', essencial: it?!!it.essencial:true, parcelas: it?(+it.parcelas||1):1 };
     const rec = it ? [] : recentes();
-    abrir(`${topo}<h2>${it?'Editar':'Novo'} gasto</h2>
+    abrir(`${topo}${it?'':blocoFrase()}<h2>${it?'Editar':'Novo'} gasto</h2>
       <div class="f"><input class="money num big" id="fValor" inputmode="decimal" placeholder="R$ 0,00" aria-label="Valor" value="${moneyVal(it&&it.valor)}"></div>
       ${rec.length?`<div class="f"><label>Usados com frequência</label><div class="chips rec">${rec.map((g,i)=>`<button type="button" data-rec="${i}">${emojiCat(g.cat)} ${esc(g.desc||nomeCat(g.cat))}</button>`).join('')}</div></div>`:''}
       <div class="f"><label>Categoria</label><div class="catgrid">${CATEGORIAS.map(c=>`<button type="button" class="${c===form.v.cat?'on':''}" data-catsel="${esc(c)}"><span>${emojiCat(c)}</span>${esc(nomeCat(c))}</button>`).join('')}</div></div>
@@ -720,11 +1119,15 @@ function abrirForm(tipo, id, mk){
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
   if (tipo==='reservas'){
-    form.v = { tipo: it?it.tipo:'Reserva de emergência' };
-    abrir(`${topo}<h2>${it?'Editar':'Nova'} reserva ou investimento</h2>
-      <div class="f"><label>Valor</label><input class="money num" id="fValor" inputmode="decimal" placeholder="0,00" value="${moneyVal(it&&it.valor)}"></div>
-      <div class="f"><label>Tipo</label>${chips('tipo',TIPOS_RES,form.v.tipo)}</div>
-      <div class="f"><label>Onde (opcional)</label><input id="fNome" placeholder="Ex.: Nubank, Tesouro, CDB" value="${esc(it?it.nome:'')}"></div>
+    // destino: 'cof:<id>' para cofrinho ou um tipo de investimento
+    const destIt = it ? (cofDe(it) ? 'cof:'+cofDe(it) : it.tipo) : (opcoes && opcoes.cof ? 'cof:'+opcoes.cof : S.cofrinhos.length ? 'cof:'+S.cofrinhos[0].id : 'Renda Fixa');
+    form.v = { dest: destIt, retirada: it ? it.valor<0 : !!(opcoes && opcoes.retirada) };
+    const destinos = [...S.cofrinhos.map(c=>['cof:'+c.id, `${c.emoji} ${c.nome}`]), ...TIPOS_INVEST.map(t=>[t, t==='Outros'?'📈 Outro investimento':'📈 '+t])];
+    abrir(`${topo}<h2>${it?'Editar':form.v.retirada?'Retirar do cofrinho':'Guardar dinheiro'}</h2>
+      <div class="f"><label>Valor</label><input class="money num" id="fValor" inputmode="decimal" placeholder="0,00" value="${moneyVal(it&&Math.abs(it.valor))}"></div>
+      <div class="f"><label>Para onde</label><div class="chips" data-chips="dest">${destinos.map(([v,l])=>`<button type="button" class="${v===form.v.dest?'on':''}" data-v="${esc(v)}">${esc(l)}</button>`).join('')}<button type="button" class="novo-cof" data-act="novoCof">+ Novo cofrinho</button></div></div>
+      <div class="switch f"><span>É uma retirada <small class="muted">(tirou dinheiro do cofrinho)</small></span><button type="button" class="tg ${form.v.retirada?'on':''}" data-act="tgRetirada"></button></div>
+      <div class="f"><label>Onde está o dinheiro (opcional)</label><input id="fNome" placeholder="Ex.: Nubank, Tesouro, CDB" value="${esc(it?it.nome:'')}"></div>
       <div class="f"><label>Data</label><input type="date" id="fData" value="${it?it.data||'':dataPadrao()}"></div>
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
@@ -764,15 +1167,18 @@ function salvarForm(){
     obj = { nome, planejado, valor: v.pago?valor:0, pago:v.pago, data: v.pago?(g('fData')||dataHoje()):'', venc };
   }
   if (tipo==='reservas'){
-    const valor=parseValor(g('fValor')); if(!valor) return toast('Informe o valor');
-    obj = { tipo:v.tipo, nome:g('fNome'), valor, data:g('fData') };
+    let valor=Math.abs(parseValor(g('fValor'))); if(!valor) return toast('Informe o valor');
+    if (v.retirada) valor = -valor;
+    const ehCof = v.dest.startsWith('cof:');
+    obj = { tipo: ehCof ? 'Cofrinho' : v.dest, cof: ehCof ? v.dest.slice(4) : undefined, nome:g('fNome'), valor, data:g('fData') };
   }
   if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
-  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; }
+  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo(); }
   salvar(); fechar();
   if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
   toast(tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
+  checarConquistas();
 }
 // Mensagem depois de lançar um gasto numa categoria com orçamento.
 function avisoOrcamento(c){
@@ -803,9 +1209,9 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button,[data-cat],[data-catsel],[data-rec]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof]');
   if (!t) return;
-  if (t.parentElement && t.parentElement.dataset.chips){
+  if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
     const name = t.parentElement.dataset.chips;
     t.parentElement.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b===t));
     form.v[name] = name==='essencial' ? t.dataset.v==='Sim' : t.dataset.v;
@@ -823,6 +1229,7 @@ document.addEventListener('click', e=>{
     return;
   }
   if (t.dataset.cat){ abrirCategoria(t.dataset.cat); return; }
+  if (t.dataset.cof){ abrirCofrinho(t.dataset.cof); return; }
   if (t.dataset.tab){ fechar(); aba=t.dataset.tab; render(); scrollTo(0,0); return; }
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
   if (t.dataset.edit){ abrirForm(t.dataset.edit, t.dataset.id, t.dataset.mk); return; }
@@ -830,8 +1237,8 @@ document.addEventListener('click', e=>{
   if (t.dataset.pay){
     const M = mes(cur.y,cur.m,true), c = M.contas.find(x=>x.id===t.dataset.pay);
     c.pago = !c.pago;
-    if (c.pago){ if(!c.valor) c.valor = c.planejado; c.data = c.data || dataHoje(); } else { c.valor = 0; c.data=''; }
-    salvar(); render(); return;
+    if (c.pago){ if(!c.valor) c.valor = c.planejado; c.data = c.data || dataHoje(); registrarDiaAtivo(); } else { c.valor = 0; c.data=''; }
+    salvar(); render(); checarConquistas(); return;
   }
   const a = t.dataset.act;
   if (a==='limparBusca'){ busca=''; render(); }
@@ -867,11 +1274,6 @@ document.addEventListener('click', e=>{
     if (v>0) S.orcamentos[c] = v; else delete S.orcamentos[c];
     salvar(); fechar(); render(); toast(v>0 ? 'Orçamento salvo ✓' : 'Limite removido');
   }
-  else if (a==='salvarMetas'){
-    const v=(i)=>document.getElementById(i).value;
-    S.perfil.metaNome = v('mNome').trim(); S.perfil.metaValor = parseValor(v('mValor')); S.perfil.reservaMeta = parseValor(v('mRes'));
-    salvar(); render(); toast('Metas salvas ✓');
-  }
   else if (a==='salvarPerfil'){
     S.perfil.nome = document.getElementById('pNome').value.trim(); S.perfil.pronome = document.getElementById('pPron').value;
     salvar(); render(); toast('Perfil salvo ✓');
@@ -899,9 +1301,21 @@ document.addEventListener('click', e=>{
     if (!v('oNome')) return toast('Como podemos te chamar?');
     S.perfil = { nome:v('oNome'), pronome:document.getElementById('oPron').value, metaNome:v('oMeta'),
       metaValor:parseValor(v('oMetaV')), reservaMeta:parseValor(v('oRes')), ok:true };
+    S.cofrinhos = [];
+    if (S.perfil.reservaMeta > 0) S.cofrinhos.push({ id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:S.perfil.reservaMeta, prazo:'' });
+    if (S.perfil.metaValor > 0 || S.perfil.metaNome) S.cofrinhos.push({ id:'meta', nome:S.perfil.metaNome||'Minha meta', emoji:'🎯', alvo:S.perfil.metaValor, prazo:'' });
     S.tourVisto = false; S.versaoVista = APP_VERSAO; aba = 'resumo'; salvar(); render(); iniciarTour();
   }
   else if (a==='fecharNovidades'){ S.versaoVista = APP_VERSAO; salvar(); fechar(); }
+  else if (a==='novoCof'){ editarCofrinho(); }
+  else if (a==='editarCof'){ editarCofrinho(t.dataset.cofId); }
+  else if (a==='salvarCof'){ salvarCofrinho(); }
+  else if (a==='excluirCof'){ excluirCofrinho(); }
+  else if (a==='guardarCof'){ abrirForm('reservas', null, null, { cof:t.dataset.cofId }); }
+  else if (a==='retirarCof'){ abrirForm('reservas', null, null, { cof:t.dataset.cofId, retirada:true }); }
+  else if (a==='tgRetirada'){ form.v.retirada=!form.v.retirada; t.classList.toggle('on',form.v.retirada); }
+  else if (a==='ouvir'){ ouvirFrase(t); }
+  else if (a==='retro'){ abrirRetro(+t.dataset.y, +t.dataset.m); }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
@@ -1004,7 +1418,7 @@ function entregarArquivo(nome, dados, tipo, titulo, aoConcluir){
 function fazerBackup(){
   const dados = JSON.stringify({ ...S, backupEm: new Date().toISOString() }, null, 2);
   entregarArquivo('backup-financas-'+dataHoje()+'.json', dados, 'application/json', 'Backup Organização Financeira',
-    () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); });
+    () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); checarConquistas(); });
 }
 // Planilha (CSV no padrão brasileiro: ; entre colunas, vírgula decimal, BOM para o Excel reconhecer acentos).
 // Compras parceladas viram uma linha por parcela, no mês de cada parcela.
@@ -1022,7 +1436,7 @@ function exportarCsv(){
     (parcelas()[k]||[]).forEach(x=>{ const o = ymDe(k), d = x.g.data ? key(o.y,o.m)+'-'+String(Math.min(+x.g.data.slice(8,10), diasNoMes(o.y,o.m))).padStart(2,'0') : '';
       add(k, d, 'Gasto', x.g.desc||nomeCat(x.g.cat), nomeCat(x.g.cat), 'Crédito', `${x.i+1}/${x.n}`, x.valor, x.g.essencial?'Sim':'Não', `Compra de ${valorBR(x.g.valor)} em ${mesBR(x.origem)}`); });
     M.contas.forEach(c=>add(k, c.data, 'Conta', c.nome, 'Contas fixas', '', '', c.pago?c.valor:(c.planejado||c.valor), '', c.pago?'Paga':`Pendente${c.venc?' (vence dia '+c.venc+')':''}`));
-    M.reservas.forEach(r=>add(k, r.data, 'Reserva', r.nome||r.tipo, r.tipo, '', '', r.valor, '', ''));
+    M.reservas.forEach(r=>{ const c = cofPorId(cofDe(r)); add(k, r.data, r.valor<0?'Retirada':'Reserva', r.nome||(c?c.nome:r.tipo), c?'Cofrinho: '+c.nome:r.tipo, '', '', r.valor, '', ''); });
   });
   if (!linhas.length) return toast('Ainda não há lançamentos para exportar');
   linhas.sort((a,b)=> a.ordem.localeCompare(b.ordem));
@@ -1032,6 +1446,7 @@ function exportarCsv(){
   entregarArquivo('lancamentos-financas-'+dataHoje()+'.csv', csv, 'text/csv', 'Lançamentos Organização Financeira', () => toast('Planilha exportada ✓'));
 }
 
+document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
   if (e.target.id==='fBusca'){
@@ -1053,7 +1468,7 @@ document.addEventListener('change', e=>{
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && form && e.target.tagName==='INPUT') salvarForm(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && e.target.tagName==='INPUT') salvarForm(); });
 
 /* ---------- atualizações ----------
    versao.json diz qual é a versão publicada. Se for mais nova que este código:
@@ -1103,7 +1518,7 @@ const PASSOS_TOUR = [
   { aba:'resumo', sel:'.monthbar', titulo:'Mês a mês',
     texto:'Use as setas para ver outros meses. O que sobra num mês passa para o seguinte (dá para desligar em Ajustes).' },
   { aba:'resumo', sel:'nav .fab', titulo:'Lançar é rápido',
-    texto:'Toque no <b>+</b>, digite o valor, escolha a categoria e salve. Por ali você também lança entradas, contas e reservas. No crédito, dá para parcelar.' },
+    texto:'Toque no <b>+</b>, digite o valor, escolha a categoria e salve. Ou só escreva (ou fale 🎤) algo como <b>“gastei 45 no ifood no crédito”</b> que o app preenche tudo.' },
   { aba:'resumo', sel:'#cardCategorias', titulo:'Para onde vai seu dinheiro',
     texto:'Gráficos dos seus gastos por categoria. Toque numa categoria para ver o histórico dos últimos meses.' },
   { aba:'lanc', sel:'.busca', titulo:'Seus lançamentos',
@@ -1112,8 +1527,8 @@ const PASSOS_TOUR = [
     texto:'Cadastre aluguel, luz, internet… com o dia do vencimento. Marque ✓ quando pagar. O app avisa quando uma conta está para vencer e copia suas contas para o mês seguinte.' },
   { aba:'metas', sel:'#cardOrcamentos', titulo:'Orçamentos',
     texto:'Defina um limite por categoria, como Mercado R$ 800. O app avisa quando você chega perto e quando estoura.' },
-  { aba:'metas', sel:'#cardMetas', titulo:'Metas e reserva',
-    texto:'Acompanhe sua meta e sua reserva de emergência. Lance em <b>Reservas</b> o que guardar e o app mostra quando você vai chegar lá.' },
+  { aba:'metas', sel:'#cardMetas', titulo:'Cofrinhos',
+    texto:'Crie cofrinhos para cada objetivo: viagem, carro, reserva de emergência… Defina um prazo e o app diz <b>quanto guardar por mês</b>.' },
   { aba:'ajustes', sel:'#cardBackup', titulo:'Faça backup',
     texto:'Seus dados ficam só neste aparelho. Faça backup de vez em quando para não perder nada ao trocar de celular — o app te lembra.' },
   { aba:'resumo', titulo:'🎉 Tudo pronto!',
@@ -1198,6 +1613,7 @@ if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
 verificarAcesso();
 checarVersao(false);
 mostrarNovidades();
+setTimeout(checarConquistas, 1200);
 window.addEventListener('online', verificarAcesso);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
