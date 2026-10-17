@@ -45,7 +45,7 @@ Para abrir o app sem pedir acesso, troque `exigirCodigo: true` por `false` no co
 - **Nome e cores:** `manifest.webmanifest` (nome do app) e o bloco `:root` no `index.html` (cores).
 - **Frases motivacionais e categorias:** começo do `app.js`.
 - **Link na imagem da retrospectiva:** `linkDivulgacao` no começo do `app.js` (ex.: sua página de vendas). Quem compartilhar a retrospectiva divulga o app.
-- **Palavras do lançamento por frase:** lista `PALAVRAS_CAT` no `app.js`.
+- **Palavras do lançamento por frase e da importação de extrato:** lista `PALAVRAS_CAT` no `app.js`.
 - **Ícones:** pasta `icons/`.
 
 ## Publicar uma atualização

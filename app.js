@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 22;
+const APP_VERSAO = 23;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -495,7 +495,7 @@ const PALAVRAS_CAT = [
   ['⛽ Gasolina', ['gasolina','posto','combustivel','etanol','abasteci','abastecer','diesel']],
   ['🚗 Transporte', ['uber','99 pop','onibus','metro','passagem','estacionamento','pedagio','taxi','trem','bilhete unico','oficina','mecanico','lava jato','ipva','seguro do carro','licenciamento']],
   ['🏠 Casa', ['aluguel','condominio','movel','moveis','reforma','material de construcao','produtos de limpeza','decoracao','iptu','eletrodomestico']],
-  ['💊 Saúde', ['farmacia','remedio','remedios','medico','consulta','dentista','exame','exames','plano de saude','hospital','academia','terapia','psicologo','drogaria']],
+  ['💊 Saúde', ['farmacia','remedio','remedios','medico','consulta','dentista','exame','exames','plano de saude','hospital','academia','terapia','psicologo','drogaria','smart fit','smartfit','bluefit','selfit','bodytech','gympass','wellhub','totalpass','pague menos','raia','drogasil','panvel']],
   ['📦 Compras Online', ['amazon','shopee','mercado livre','shein','aliexpress','magalu','temu','compra online','compras online']],
   ['👕 Vestuário', ['roupa','roupas','tenis','sapato','sapatos','camisa','camiseta','calca','vestido','blusa','bermuda','renner','riachuelo','zara','sandalia','chinelo']],
   ['🎉 Lazer', ['cinema','show','bar','cerveja','festa','viagem','passeio','balada','ingresso','ingressos','parque','praia','hotel','pousada','boliche','jogo']],
@@ -513,6 +513,16 @@ const PALAVRAS_VAZIAS = new Set(['gastei','paguei','comprei','gasto','compra','f
 const normTxt = (t) => semAcento(t).replace(/[^a-z0-9$,.\s]/g,' ').replace(/\s+/g,' ').trim();
 const temPalavra = (txt, w) => new RegExp('(^|\\s)' + w.replace(/[.$]/g,'\\$&') + '(?=\\s|$)').test(txt);
 
+// Categoria de um texto: primeiro o histórico do usuário (descrição já usada), depois as palavras-chave (a mais longa ganha).
+function categorizar(texto){
+  const tt = normTxt(texto).replace(/[.,]/g,' ').replace(/\s+/g,' ');
+  let melhor = null;
+  Object.values(S.meses).forEach(M => M.gastos.forEach(g => { const d = normTxt(g.desc); if (d.length>=3 && temPalavra(tt, d) && (!melhor || d.length > melhor.n.length)) melhor = { n:d, cat:g.cat, desc:g.desc }; }));
+  if (melhor) return { cat:melhor.cat, desc:melhor.desc };
+  let kw = null;
+  PALAVRAS_CAT.forEach(([cat, ws]) => ws.forEach(w => { if (temPalavra(tt, w) && (!kw || w.length > kw.w.length)) kw = { w, cat }; }));
+  return { cat: kw ? kw.cat : null };
+}
 function interpretarFrase(frase){
   const out = { tipo:'gastos' };
   let t = ' ' + normTxt(frase) + ' ';
@@ -548,17 +558,7 @@ function interpretarFrase(frase){
     else if (/\s(invest|apliq)/.test(t)) out.dest = 'Renda Fixa';
   } else if (VERBOS_ENTRADA.some(w=>temPalavra(t.trim(), w))) out.tipo = 'entradas';
   // categoria: primeiro o histórico do usuário, depois as palavras-chave (a mais longa ganha)
-  if (out.tipo === 'gastos'){
-    const tt = t.trim();
-    let melhor = null;
-    Object.values(S.meses).forEach(M => M.gastos.forEach(g => { const d = normTxt(g.desc); if (d.length>=3 && temPalavra(tt, d) && (!melhor || d.length > melhor.n.length)) melhor = { n:d, cat:g.cat, desc:g.desc }; }));
-    if (melhor){ out.cat = melhor.cat; out.desc = melhor.desc; }
-    else {
-      let kw = null;
-      PALAVRAS_CAT.forEach(([cat, ws]) => ws.forEach(w => { if (temPalavra(tt, w) && (!kw || w.length > kw.w.length)) kw = { w, cat }; }));
-      if (kw) out.cat = kw.cat;
-    }
-  }
+  if (out.tipo === 'gastos'){ const c = categorizar(t); if (c.cat) out.cat = c.cat; if (c.desc) out.desc = c.desc; }
   // descrição: o que sobrou, sem palavras de ligação nas pontas
   if (!out.desc){
     const verbos = ['gastei','paguei','comprei','recebi','ganhei','guardei','poupei','investi','apliquei','reservei','juntei'];
@@ -632,6 +632,132 @@ function ouvirFrase(btn){
 }
 const blocoFrase = () => `<div class="frase"><input id="fFrase" enterkeyhint="done" autocomplete="off" placeholder="✨ Ex.: gastei 45 no ifood no crédito">
   <button type="button" class="mic" data-act="ouvir" aria-label="Falar a frase">🎤</button></div><div class="frase-info" id="fraseInfo"></div>`;
+
+/* ---------- importar extrato do banco (OFX ou CSV) ----------
+   Tudo é lido no próprio aparelho. Sugere categoria, separa gastos e entradas, desmarca duplicados
+   e pagamentos de fatura. O cliente confere antes de importar. */
+let imp = null;
+function lerArquivoTexto(arquivo){
+  return arquivo.arrayBuffer().then(buf => {
+    try { return new TextDecoder('utf-8', { fatal:true }).decode(buf); }
+    catch(e){ return new TextDecoder('windows-1252').decode(buf); }   // OFX de banco costuma vir em latin-1
+  });
+}
+function valorBanco(t){
+  t = String(t||'').replace(/R\$|\s/g,'');
+  if (!t) return NaN;
+  const neg = /^-|^\(.*\)$|-$/.test(t); t = t.replace(/[()\-+]/g,'');
+  const ul = Math.max(t.lastIndexOf(','), t.lastIndexOf('.'));
+  if (ul >= 0 && t.length - ul - 1 <= 2) t = t.slice(0,ul).replace(/[.,]/g,'') + '.' + t.slice(ul+1);
+  else t = t.replace(/[.,]/g,'');
+  const n = parseFloat(t); return isNaN(n) ? NaN : (neg ? -n : n);
+}
+function dataBanco(t){
+  t = String(t||'').trim();
+  let m = t.match(/^(\d{4})-?(\d{2})-?(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  m = t.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})/);
+  if (m){ const y = m[3].length===2 ? '20'+m[3] : m[3]; return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; }
+  return null;
+}
+function lerOFX(txt){
+  const cartao = /CREDITCARDMSGSRS|CCSTMTRS/i.test(txt);
+  const trans = txt.split(/<STMTTRN>/i).slice(1).map(b => {
+    const tag = (n) => ((b.match(new RegExp('<' + n + '>([^<\\r\\n]*)', 'i')) || [])[1] || '').trim();
+    return { data: dataBanco(tag('DTPOSTED')), valor: valorBanco(tag('TRNAMT').replace(',', '.')), desc: tag('MEMO') || tag('NAME') || 'Lançamento' };
+  });
+  return { trans, cartao };
+}
+function linhasCSV(txt){
+  const linhas = txt.replace(/\r/g,'').split('\n').filter(l=>l.trim());
+  const sep = (linhas[0].match(/;/g)||[]).length >= (linhas[0].match(/,/g)||[]).length ? ';' : ',';
+  return linhas.map(l => { const out = []; let cel = '', q = false;
+    for (let i=0;i<l.length;i++){ const c = l[i];
+      if (c === '"'){ if (q && l[i+1] === '"'){ cel += '"'; i++; } else q = !q; }
+      else if (c === sep && !q){ out.push(cel); cel = ''; } else cel += c; }
+    out.push(cel); return out.map(x=>x.trim()); });
+}
+function lerCSV(txt){
+  const L = linhasCSV(txt); if (!L.length) return { trans:[] };
+  const cab = L[0].map(h => normTxt(h));
+  let iD = cab.findIndex(h => /^(data|date|dt)/.test(h));
+  let iT = cab.findIndex(h => /(descri|title|titulo|historico|hist|lancamento|estabelecimento|detalhe|memo|nome)/.test(h));
+  let iV = cab.findIndex(h => /(valor|amount|value|quantia|montante)/.test(h));
+  let corpo = L.slice(1);
+  if (iD < 0 || iV < 0){   // sem cabeçalho reconhecível: adivinha pelas colunas
+    corpo = L; const ex = L[0];
+    iD = ex.findIndex(c => dataBanco(c)); iV = ex.findIndex((c,i) => i!==iD && !isNaN(valorBanco(c)) && /\d/.test(c));
+    iT = ex.findIndex((c,i) => i!==iD && i!==iV && c.length > 2);
+  }
+  const trans = corpo.map(c => ({ data: dataBanco(c[iD]), valor: valorBanco(c[iV]), desc: (iT>=0 ? c[iT] : '') || 'Lançamento' }))
+    .filter(t => t.data && !isNaN(t.valor));
+  const positivos = trans.filter(t=>t.valor>0).length;
+  return { trans, cartao: trans.length && positivos > trans.length/2 };   // fatura de cartão costuma vir com compras positivas
+}
+const PREFIXOS_BANCO = /^(compra (no|com|em) (cart[aã]o (de )?)?(d[eé]bito|cr[eé]dito)\s*-?\s*|compra\s*-?\s*|pagamento (efetuado|de boleto|de conta)\s*-?\s*|transfer[eê]ncia (enviada|recebida)( pelo pix)?\s*-?\s*|pix (enviado|recebido|transf\w*)\s*-?\s*|d[eé]bito autom[aá]tico\s*-?\s*|deb(ito)?\.?\s+|cred(ito)?\.?\s+)/i;
+function limparDesc(d){
+  let t = String(d||'').replace(PREFIXOS_BANCO,'').replace(/\*/g,' ').replace(/\s{2,}/g,' ').trim();
+  t = t.replace(/\s*-?\s*parcela\s*(\d+)\s*(?:\/|de)\s*(\d+)/i, ' ($1/$2)');            // "Loja - Parcela 2/5" → "Loja (2/5)"
+  t = t.split(' ').filter((w,i,a) => i===0 || w.toLowerCase() !== a[i-1].toLowerCase()).join(' ');   // "IFOOD IFOOD" → "IFOOD"
+  t = t.replace(/\.com(\.br)?$/i,'');
+  if (t && t === t.toUpperCase()) t = t.toLowerCase().replace(/(^|\s)\S/g, x => x.toUpperCase());
+  return (t || 'Lançamento').slice(0,40);
+}
+function abrirImportacao(arquivo){
+  lerArquivoTexto(arquivo).then(txt => {
+    const ehOFX = /<OFX>|<STMTTRN>/i.test(txt);
+    const r = ehOFX ? lerOFX(txt) : lerCSV(txt);
+    const trans = r.trans.filter(t => t.data && !isNaN(t.valor) && Math.abs(t.valor) >= 0.01);
+    if (!trans.length) return toast('Não encontramos transações nesse arquivo. Use o extrato em OFX ou CSV.');
+    imp = { modo: r.cartao ? 'cartao' : 'conta', sinalCompra: ehOFX ? -1 : (r.cartao ? 1 : -1),
+      itens: trans.map((t,i) => { const desc = limparDesc(t.desc), c = categorizar(desc.replace(/\(\d+\/\d+\)/,''));
+        return { i, data:t.data, valor:t.valor, original:t.desc, desc, cat: c.cat || '❓ Outros' }; }) };
+    prepararImportacao(); desenharImportacao();
+  }).catch(() => toast('Não foi possível ler o arquivo.'));
+}
+// Recalcula tipo (gasto/entrada), duplicados e o que vem marcado, conforme o modo (conta ou cartão).
+function prepararImportacao(){
+  const compra = imp.modo === 'cartao' ? imp.sinalCompra : -1;
+  imp.itens.forEach(x => {
+    x.tipo = Math.sign(x.valor) === compra ? 'gastos' : 'entradas';
+    x.fatura = /pagamento (de |da )?fatura|pagamento recebido|pgto\.? fatura|pag\.? fatura|fatura (do )?cart/i.test(semAcento(x.original));
+    if (imp.modo === 'cartao' && x.tipo === 'entradas') x.fatura = x.fatura || true;   // no cartão, créditos são pagamentos/estornos
+    const M = S.meses[x.data.slice(0,7)];
+    const perto = (d) => d && Math.abs(new Date(d+'T12:00:00') - new Date(x.data+'T12:00:00')) <= 864e5;
+    x.dup = !!M && (x.tipo === 'gastos'
+      ? M.gastos.some(g => Math.abs(g.valor - Math.abs(x.valor)) < 0.01 && perto(g.data))
+      : M.entradas.some(e => Math.abs(e.valor - Math.abs(x.valor)) < 0.01 && perto(e.data)));
+    x.sel = !x.dup && !x.fatura;
+  });
+}
+function desenharImportacao(){
+  const it = imp.itens, sel = it.filter(x=>x.sel);
+  const datas = it.map(x=>x.data).sort();
+  const opts = (c) => CATEGORIAS.map(k=>`<option value="${esc(k)}" ${k===c?'selected':''}>${k}</option>`).join('');
+  abrir(`<h2>📥 Importar extrato</h2>
+    <p class="note" style="margin:-6px 0 12px">${it.length} transações de ${fmtData(datas[0])}/${datas[0].slice(2,4)} a ${fmtData(datas[datas.length-1])}/${datas[datas.length-1].slice(2,4)}. Confira as categorias e desmarque o que não quiser.</p>
+    <div class="seg sm"><button type="button" class="${imp.modo==='conta'?'on':''}" data-impmodo="conta">Conta (débito/Pix)</button><button type="button" class="${imp.modo==='cartao'?'on':''}" data-impmodo="cartao">Cartão de crédito</button></div>
+    <div class="list flat imp-lista">${it.map(x=>`<div class="item imp ${x.sel?'':'off'}">
+      <input type="checkbox" data-impsel="${x.i}" ${x.sel?'checked':''} aria-label="Importar ${esc(x.desc)}">
+      <div class="tx"><div class="t1">${esc(x.desc)}</div>
+        <div class="t2">${fmtData(x.data)} · ${x.tipo==='gastos' ? `<select data-impcat="${x.i}" aria-label="Categoria">${opts(x.cat)}</select>` : 'Entrada'}
+        ${x.dup?'<span class="tag warn">já lançado</span>':''}${x.fatura?'<span class="tag">pagamento de fatura</span>':''}</div></div>
+      <div class="val num ${x.tipo==='entradas'?'up':''}">${brl(Math.abs(x.valor))}</div></div>`).join('')}</div>
+    <p class="note">${imp.modo==='cartao' ? 'Gastos do cartão entram como Crédito (vão para a fatura do mês seguinte).' : 'Gastos da conta entram como Débito ou Pix.'}</p>
+    <button class="btn pri" data-act="confirmarImp">Importar ${sel.length} lançamento${sel.length===1?'':'s'}</button>`);
+}
+function confirmarImportacao(){
+  const sel = imp.itens.filter(x=>x.sel); if (!sel.length) return toast('Nenhum lançamento marcado');
+  sel.forEach(x => {
+    const o = ymDe(x.data.slice(0,7)), M = mes(o.y, o.m, true), valor = Math.round(Math.abs(x.valor)*100)/100;
+    if (x.tipo === 'gastos'){
+      const forma = imp.modo === 'cartao' ? 'Crédito' : /pix/i.test(x.original) ? 'Pix / Dinheiro' : 'Débito';
+      M.gastos.push({ id:uid(), cat:x.cat, forma, valor, data:x.data, essencial:ESSENCIAIS.includes(x.cat), desc:x.desc, parcelas:1, importado:true });
+    } else M.entradas.push({ id:uid(), nome:x.desc, valor, data:x.data, importado:true });
+  });
+  S.novosDesdeBackup = (S.novosDesdeBackup||0) + sel.length; registrarDiaAtivo(); salvar();
+  const ultimo = ymDe(sel.map(x=>x.data).sort().pop().slice(0,7)); cur = ultimo; imp = null;
+  fechar(); aba = 'lanc'; subLanc = 'gastos'; render(); toast(`${sel.length} lançamentos importados ✓`); checarConquistas();
+}
 
 /* ---------- cofrinhos ----------
    Cada reserva pode ir para um cofrinho (campo cof). Reservas antigas usam o tipo. Retiradas são valores negativos. */
@@ -1130,7 +1256,7 @@ function telaLanc(){
     parcOutras.forEach(x=>{
       h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
-    h += `</div>`;
+    h += `</div><button class="btn sec" data-act="importarExtrato">📥 Importar extrato do banco</button>`;
   }
   if (subLanc==='reservas'){
     h += `<div class="totalrow"><span>Total reservado/investido</span><b class="num">${brl(C.reservas)}</b></div><div class="list">`;
@@ -1317,10 +1443,14 @@ function telaAjustes(){
     <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
     <button class="btn sec" data-act="importar">⬆️ Restaurar backup</button>
     <input type="file" id="fileImp" hidden></section>
+  
   <section class="card"><h3>Exportar para Excel</h3>
     <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
     <button class="btn sec" data-act="exportarCsv">📊 Exportar lançamentos</button>
 </section>
+  <section class="card"><h3>Importar extrato do banco</h3>
+    <p class="note" style="margin:0 0 12px">Baixe o extrato no app do seu banco (OFX ou CSV) e importe aqui. O app sugere as categorias e você confere antes. O arquivo é lido só no seu aparelho.</p>
+    <button class="btn sec" data-act="importarExtrato">📥 Importar extrato</button></section>
   ${cardPrivacidade()}
   <section class="card"><h3>Conta</h3>
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
@@ -1486,7 +1616,7 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo]');
   if (!t) return;
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
     const name = t.parentElement.dataset.chips;
@@ -1509,6 +1639,7 @@ document.addEventListener('click', e=>{
   if (t.dataset.cof){ abrirCofrinho(t.dataset.cof); return; }
   if (t.dataset.tab){ fechar(); aba=t.dataset.tab; render(); scrollTo(0,0); return; }
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
+  if (t.dataset.impmodo){ imp.modo = t.dataset.impmodo; prepararImportacao(); const top = $sh.scrollTop; desenharImportacao(); $sh.scrollTop = top; return; }
   if (t.dataset.dia){ calSel = { k:key(cur.y,cur.m), d:+t.dataset.dia }; render(); return; }
   if (t.dataset.edit){ abrirForm(t.dataset.edit, t.dataset.id, t.dataset.mk); return; }
   if (t.dataset.new){ const v = document.getElementById('fValor'); const val = v ? v.value : ''; abrirForm(t.dataset.new); const n = document.getElementById('fValor'); if (n && val) n.value = val; return; }
@@ -1604,6 +1735,8 @@ document.addEventListener('click', e=>{
   else if (a==='assinaturas'){ abrirAssinaturas(); }
   else if (a==='ignorarAssin'){ S.assinIgnoradas = [...new Set([...(S.assinIgnoradas||[]), t.dataset.chave])]; salvar(); render(); abrirAssinaturas(); toast('Removido da lista'); }
   else if (a==='restaurarAssin'){ S.assinIgnoradas = []; salvar(); render(); abrirAssinaturas(); }
+  else if (a==='importarExtrato'){ let f = document.getElementById('fileExtrato'); if (!f){ f = document.createElement('input'); f.type = 'file'; f.id = 'fileExtrato'; f.hidden = true; document.body.appendChild(f); } f.value = ''; f.click(); }
+  else if (a==='confirmarImp'){ confirmarImportacao(); }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
@@ -1762,6 +1895,10 @@ document.addEventListener('input', e=>{
   }
 });
 document.addEventListener('change', e=>{
+  if (e.target.id === 'fileExtrato' && e.target.files[0]) return abrirImportacao(e.target.files[0]);
+  if (e.target.dataset.impsel){ const x = imp.itens[+e.target.dataset.impsel]; x.sel = e.target.checked; e.target.closest('.imp').classList.toggle('off', !x.sel);
+    const n = imp.itens.filter(y=>y.sel).length; $sh.querySelector('[data-act=confirmarImp]').textContent = `Importar ${n} lançamento${n===1?'':'s'}`; return; }
+  if (e.target.dataset.impcat){ imp.itens[+e.target.dataset.impcat].cat = e.target.value; return; }
   if (e.target.id==='fParc') return infoParcelas();
   if (e.target.id!=='fileImp' || !e.target.files[0]) return;
   const r = new FileReader();

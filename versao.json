@@ -1,6 +1,6 @@
 {
-  "versao": 22,
+  "versao": 23,
   "novidades": [
-    "📅 Calendário financeiro: em Lançamentos → Calendário, veja seus gastos dia a dia, as contas a vencer e quantos dias você passou sem gastar."
+    "📥 Importar extrato do banco: baixe o extrato (OFX ou CSV) no app do seu banco e importe em Lançamentos → Gastos. O app sugere as categorias e você confere antes."
   ]
 }
