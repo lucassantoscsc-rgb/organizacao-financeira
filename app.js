@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 16;
+const APP_VERSAO = 17;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -1446,6 +1446,14 @@ function exportarCsv(){
   entregarArquivo('lancamentos-financas-'+dataHoje()+'.csv', csv, 'text/csv', 'Lançamentos Organização Financeira', () => toast('Planilha exportada ✓'));
 }
 
+// Campos de dinheiro: os centavos entram sozinhos enquanto digita (4 → 0,04 → 0,45 → 4,59 → 45,90), como nos apps de banco.
+document.addEventListener('input', e=>{
+  const el = e.target;
+  if (el.tagName !== 'INPUT' || el.getAttribute('inputmode') !== 'decimal') return;
+  const digitos = el.value.replace(/\D/g,'').replace(/^0+/,'').slice(0,11);
+  el.value = digitos ? (parseInt(digitos,10)/100).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}) : '';
+  try { el.setSelectionRange(el.value.length, el.value.length); } catch(_){}
+}, true);
 document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
