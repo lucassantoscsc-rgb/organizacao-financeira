@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 31;
+const APP_VERSAO = 32;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -48,7 +48,7 @@ const LINK_COMPRA = 'https://planilhadeorganizacaofinanceira.online';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
-  if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; if (!S.cartoes) S.cartoes = []; if (!S.dividas) S.dividas = []; S.v = 2;
+  if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; if (!S.cartoes) S.cartoes = []; if (!S.dividas) S.dividas = []; if (!S.aReceber) S.aReceber = []; S.v = 2;
   // Cofrinhos: a meta e a reserva de emergência antigas viram os dois primeiros.
   if (!S.cofrinhos){
     S.cofrinhos = [];
@@ -312,6 +312,84 @@ function desenharPlano(){
       <h4 class="sub-h">Ordem para quitar</h4><div class="sim-meses">${plano.ordem.map((d,i)=>`<div><span>${i+1}. ${esc(d.nome)}</span><span>${d.fim?`quitada em <b>${mesTxtCurto(d.fim)}</b>`:'—'}</span></div>`).join('')}</div>`;
   }
   box.innerHTML = h;
+}
+
+/* ---------- me devem / dividir contas ----------
+   aReceber: { id, pessoa, desc, valor, data, recebido, recebidoEm, gastoId, mk } */
+const pendentes = () => (S.aReceber||[]).filter(r=>!r.recebido);
+function pessoasFrequentes(){
+  const c = {}; (S.aReceber||[]).forEach(r => c[r.pessoa] = (c[r.pessoa]||0) + 1);
+  return Object.entries(c).sort((a,b)=>b[1]-a[1]).slice(0,6).map(x=>x[0]);
+}
+const nomesDe = (txt) => [...new Set(String(txt||'').split(/[,;]| e /).map(x=>x.trim()).filter(Boolean).map(x=>x.charAt(0).toUpperCase()+x.slice(1)))];
+function cardMeDevem(){
+  const pend = pendentes();
+  let h = `<section class="card" id="cardMeDevem"><h3>🤝 Me devem</h3>`;
+  if (!pend.length) return h + `<p class="note" style="margin:0 0 12px">Ninguém te deve nada agora. Ao lançar um gasto, use “Dividir este gasto” para registrar a parte de cada um.</p><button class="btn sec" data-act="novoAReceber">+ Alguém me deve</button></section>`;
+  const porPessoa = {}; pend.forEach(r => (porPessoa[r.pessoa] = porPessoa[r.pessoa] || []).push(r));
+  h += `<div class="assin-tot" style="grid-template-columns:1fr"><div><b class="num">${brl(soma(pend, r=>r.valor))}</b><span>para receber de ${Object.keys(porPessoa).length} pessoa${Object.keys(porPessoa).length>1?'s':''}</span></div></div>`;
+  Object.entries(porPessoa).sort((a,b)=>soma(b[1],r=>r.valor)-soma(a[1],r=>r.valor)).forEach(([p, rs]) => {
+    const desde = rs.map(r=>r.data).sort()[0];
+    h += `<button class="cartao" data-pessoa="${esc(p)}"><span class="row"><b>👤 ${esc(p)}</b><b class="num">${brl(soma(rs, r=>r.valor))}</b></span>
+      <span class="row"><span class="muted">${rs.length} ${rs.length>1?'itens':'item'} · desde ${fmtData(desde)}</span><span class="muted">${diasDesde(desde)>14?`⏰ há ${diasDesde(desde)} dias`:''}</span></span></button>`;
+  });
+  return h + `<button class="btn sec" data-act="novoAReceber">+ Alguém me deve</button></section>`;
+}
+function abrirPessoa(p){
+  const pend = pendentes().filter(r=>r.pessoa===p), recebidos = (S.aReceber||[]).filter(r=>r.pessoa===p && r.recebido).slice(-10).reverse();
+  abrir(`<h2>👤 ${esc(p)}</h2>
+    ${pend.length ? `<p class="sim-txt">Te deve <b>${brl(soma(pend, r=>r.valor))}</b>.</p>
+    <div class="list flat">${pend.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">${fmtData(r.data)}${r.gastoId?' · gasto dividido':''}</div></div><div class="val num">${brl(r.valor)}</div><button class="btn sec mini" data-act="receber" data-ids="${r.id}">Recebi</button></div>`).join('')}</div>
+    <div class="switch f" style="margin-top:12px"><span>Lançar como entrada ao receber</span><button type="button" class="tg ${S.lancarRecebidos!==false?'on':''}" data-act="tgLancarRec"></button></div>
+    <div class="row2"><button class="btn pri" data-act="receber" data-ids="${pend.map(r=>r.id).join(',')}">Recebi tudo</button><button class="btn sec" data-act="cobrar" data-pessoa-nome="${esc(p)}">📲 Cobrar</button></div>
+    <div class="f" style="margin-top:12px"><label>Sua chave Pix (vai na mensagem de cobrança)</label><input id="chavePix" placeholder="Opcional: CPF, celular, e-mail…" value="${esc(S.chavePix||'')}" autocomplete="off"></div>` : '<p class="gprev ok">Nada pendente com esta pessoa. 🎉</p>'}
+    ${recebidos.length ? `<h4 class="sub-h">Já recebidos</h4><div class="list flat">${recebidos.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">recebido em ${fmtData(r.recebidoEm)}</div></div><div class="val num up">${brl(r.valor)}</div></div>`).join('')}</div>` : ''}`);
+}
+function receber(ids){
+  const rs = (S.aReceber||[]).filter(r => ids.includes(r.id) && !r.recebido); if (!rs.length) return;
+  const hojeTxt = dataHoje(), total = soma(rs, r=>r.valor), p = rs[0].pessoa;
+  rs.forEach(r => { r.recebido = true; r.recebidoEm = hojeTxt; });
+  if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(total*100)/100, data:hojeTxt, reembolso:true }); }
+  salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(total)} de ${p} ✓`);
+}
+function cobrar(p){
+  const pend = pendentes().filter(r=>r.pessoa===p), total = soma(pend, r=>r.valor);
+  const itens = pend.map(r=>`• ${r.desc} (${fmtData(r.data)}): R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('\n');
+  const msg = `Oi ${p}! Passando para lembrar ${pend.length>1?'destes valores':'deste valor'}:\n${itens}\nTotal: R$ ${total.toLocaleString('pt-BR',{minimumFractionDigits:2})}${S.chavePix?`\n\nMinha chave Pix: ${S.chavePix}`:''}\n\nObrigado! 😊`;
+  if (navigator.share) navigator.share({ text: msg }).catch(()=>{});
+  else navigator.clipboard.writeText(msg).then(()=>toast('Mensagem copiada. Cole no WhatsApp.')).catch(()=>toast('Não foi possível copiar.'));
+}
+function novoAReceber(){
+  form = { tipo:'aReceber', v:{ emprestei:true } };
+  const freq = pessoasFrequentes();
+  abrir(`<h2>🤝 Alguém me deve</h2>
+    <div class="f"><label>Quem?</label><input id="rPessoa" placeholder="Nome" autocomplete="off">${freq.length?`<div class="chips pessoas" style="margin-top:8px">${freq.map(x=>`<button type="button" data-setpessoa="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}</div>
+    <div class="f"><label>Quanto</label><input class="money num" id="rValor" inputmode="decimal" placeholder="0,00"></div>
+    <div class="row2"><div class="f"><label>Do quê?</label><input id="rDesc" placeholder="Ex.: Empréstimo, ingresso"></div>
+    <div class="f"><label>Data</label><input type="date" id="rData" value="${dataPadrao()}"></div></div>
+    <div class="switch f"><span>Emprestei dinheiro <small class="muted">(saiu do meu saldo agora)</small></span><button type="button" class="tg on" data-act="tgEmprestei"></button></div>
+    <button class="btn pri" data-act="salvarAReceber">Salvar</button>`);
+}
+function salvarAReceber(){
+  const pessoa = nomesDe(document.getElementById('rPessoa').value)[0], valor = parseValor(document.getElementById('rValor').value);
+  if (!pessoa) return toast('Quem te deve?'); if (!valor) return toast('Informe o valor');
+  const desc = document.getElementById('rDesc').value.trim() || 'Empréstimo', data = document.getElementById('rData').value || dataHoje();
+  const r = { id:uid(), pessoa, desc, valor, data, recebido:false };
+  if (form.v.emprestei){   // sai do saldo, mas não é gasto seu (sua parte = 0)
+    const o = ymDe(data.slice(0,7)), M = mes(o.y,o.m,true), g = { id:uid(), cat:'❓ Outros', desc:`Emprestado para ${pessoa}`, valor, minha:0, forma:'Pix / Dinheiro', data, essencial:false, parcelas:1 };
+    M.gastos.push(g); r.gastoId = g.id; r.mk = key(o.y,o.m);
+  }
+  S.aReceber.push(r); salvar(); fechar(); render(); toast(`${pessoa} te deve ${brl(valor)} ✓`);
+}
+// Depois de salvar um gasto dividido: cria o que cada pessoa deve.
+function criarDivisao(g, mk){
+  const n = g.dividido.length, cada = Math.round((g.valor - g.minha) / n * 100) / 100;
+  g.dividido.forEach(p => S.aReceber.push({ id:uid(), pessoa:p, desc:g.desc || nomeCat(g.cat), valor:cada, data:g.data || dataHoje(), recebido:false, gastoId:g.id, mk }));
+}
+function infoDivisao(){
+  const el = document.getElementById('divInfo'); if (!el) return;
+  const ps = nomesDe(document.getElementById('fPessoas').value), v = parseValor(document.getElementById('fValor').value);
+  el.innerHTML = ps.length && v ? `Cada um paga <b>${brl(v/(ps.length+1))}</b> (${ps.length+1} pessoas, contando você). Você vai receber <b>${brl(v - v/(ps.length+1))}</b> de volta.` : 'Escreva os nomes separados por vírgula.';
 }
 
 function cardCartoes(){
@@ -1104,17 +1182,20 @@ function calc(y,m){
   const restante = entradas - saidas - reservas;
 
   // Consumo por categoria (o que foi gasto no mês, inclusive no crédito; parcelas contam no mês de cada parcela).
+  // Gasto dividido: no saldo sai o valor todo; nas categorias conta só a sua parte (minha).
+  const parte = (g) => g.minha != null && g.valor ? g.minha / g.valor : 1;
   const cats = {};
-  simples.forEach(g=>{ cats[g.cat] = (cats[g.cat]||0) + (+g.valor||0); });
-  parc.forEach(x=>{ cats[x.g.cat] = (cats[x.g.cat]||0) + x.valor; });
+  simples.forEach(g=>{ cats[g.cat] = (cats[g.cat]||0) + (+g.valor||0) * parte(g); });
+  parc.forEach(x=>{ cats[x.g.cat] = (cats[x.g.cat]||0) + x.valor * parte(x.g); });
   if (contasPagas) cats[CAT_CONTAS] = (cats[CAT_CONTAS]||0) + contasPagas;
   const consumo = soma(Object.values(cats), v=>v);
-  const essenciais = soma(simples.filter(g=>g.essencial), g=>g.valor) + soma(parc.filter(x=>x.g.essencial), x=>x.valor) + contasPagas;
+  const essenciais = soma(simples.filter(g=>g.essencial), g=>g.valor*parte(g)) + soma(parc.filter(x=>x.g.essencial), x=>x.valor*parte(x.g)) + contasPagas;
+  const renda = soma(M.entradas.filter(e=>!e.reembolso), e=>e.valor);   // sem devoluções de quem te devia
 
   const acumEm = (P ? P.acumEmerg : 0) + resEmerg;
   const acumMt = (P ? P.acumMeta : 0) + resMeta;
 
-  return memo[k] = { entradas, entradasLanc, saldoAnterior, faturaAnterior, saidas, reservas, restante,
+  return memo[k] = { entradas, entradasLanc, renda, saldoAnterior, faturaAnterior, saidas, reservas, restante,
     debito, credito, pix, gastosVista, contasPagas, contasPend, contasPlan, cats, consumo, essenciais,
     resEmerg, resMeta, acumEmerg:acumEm, acumMeta:acumMt, P };
 }
@@ -1257,7 +1338,7 @@ function calcularDicas(){
     else if (esp > 0 && at < esp * 0.85) dicas.push({ e:'🎉', p: 45, t:`Você está gastando <b>${pct(at,esp)}% menos</b> que o normal neste mês. Mandou bem!` });
   }
   // 4. ainda não guardou
-  if (d >= 10 && C.entradasLanc > 0 && C.reservas <= 0) dicas.push({ e:'🐷', p: 70, acao:'guardar', t:`Você ainda não guardou nada este mês. Que tal guardar <b>${brl(Math.round(C.entradasLanc*0.1/10)*10)}</b> (10% da renda) agora?` });
+  if (d >= 10 && C.renda > 0 && C.reservas <= 0) dicas.push({ e:'🐷', p: 70, acao:'guardar', t:`Você ainda não guardou nada este mês. Que tal guardar <b>${brl(Math.round(C.renda*0.1/10)*10)}</b> (10% da renda) agora?` });
   // 5. gastos pequenos
   const M = mes(y,m), peq = M.gastos.filter(g=>!ehParcelado(g) && g.valor <= 30);
   if (peq.length >= 8 && soma(peq,g=>g.valor) >= 150) dicas.push({ e:'☕', p: 50, t:`Os gastos pequenos (até R$ 30) já somam <b>${brl(soma(peq,g=>g.valor))}</b> este mês, em ${peq.length} lançamentos.` });
@@ -1270,7 +1351,7 @@ function calcularDicas(){
   const totDias = soma(porDia, v=>v), maxDia = Math.max(...porDia);
   if (totDias > 300 && maxDia/totDias >= 0.24){ const n = porDia.indexOf(maxDia); dicas.push({ e:'📅', p: 20, t:`<b>${DIAS_SEMANA[n].charAt(0).toUpperCase()+DIAS_SEMANA[n].slice(1)}</b> é o dia em que você mais gasta: ${Math.round(maxDia/totDias*100)}% dos gastos dos últimos 2 meses.` }); }
   // 8. parcelas futuras pesadas
-  const renda = base.length ? soma(base, b=>b.entradasLanc)/base.length : C.entradasLanc, fut = comprometidoFuturo();
+  const renda = base.length ? soma(base, b=>b.renda)/base.length : C.renda, fut = comprometidoFuturo();
   if (renda > 0 && fut > renda * 0.3) dicas.push({ e:'💳', p: 55, t:`Você já tem <b>${brl(fut)}</b> em parcelas nos próximos meses (${Math.round(fut/renda*100)}% de um mês de renda). Cuidado com novas compras parceladas.` });
   // 9. assinaturas
   const assin = detectarAssinaturas().filter(a=>a.ativa), anual = soma(assin, a=>a.valor) * 12;
@@ -1284,7 +1365,11 @@ function calcularDicas(){
   if (ruim.length) dicas.push({ e:'🚨', p: 90, t:`A dívida <b>${esc(ruim[0].nome)}</b> não está diminuindo: a parcela não cobre os juros do mês. Priorize pagar mais nela ou renegociar.` });
   else { const cara = dividasAtivas().filter(dv=>(dv.juros||0) >= 5).sort((a,b)=>b.juros-a.juros)[0];
     if (cara) dicas.push({ e:'🔥', p: 65, t:`Priorize quitar <b>${esc(cara.nome)}</b>: ${String(cara.juros).replace('.',',')}% de juros ao mês é muito caro. Qualquer valor extra rende mais ali do que guardado.` }); }
-  // 12. não essenciais
+  // 12. alguém te deve há mais de 2 semanas
+  const velho = pendentes().filter(r => diasDesde(r.data) > 14).sort((a,b)=>a.data.localeCompare(b.data))[0];
+  if (velho){ const tot = soma(pendentes().filter(r=>r.pessoa===velho.pessoa), r=>r.valor);
+    dicas.push({ e:'🤝', p: 48, acao:'meDevem', pessoa: velho.pessoa, t:`<b>${esc(velho.pessoa)}</b> te deve ${brl(tot)} há ${diasDesde(velho.data)} dias.` }); }
+  // 13. não essenciais
   const naoEss = C.consumo - C.essenciais;
   if (C.consumo > 500 && naoEss / C.consumo > 0.45) dicas.push({ e:'🎯', p: 35, t:`${Math.round(naoEss/C.consumo*100)}% dos seus gastos deste mês são <b>não essenciais</b>.` });
   // no máximo 2 dicas do tipo "acima do normal" (as maiores), para não repetir
@@ -1297,7 +1382,7 @@ function cardDicas(){
   const dicas = calcularDicas(); if (!dicas.length) return '';
   const vis = dicasAbertas ? dicas : dicas.slice(0,3);
   return `<section class="card" id="cardDicas"><h3>💡 Dicas do mês</h3>
-    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':x.acao==='criarReserva'?'<button class="d-acao" data-act="criarReserva">Criar reserva</button>':x.acao==='abrirReserva'?'<button class="d-acao" data-act="abrirReserva">Ajustar meta</button>':''}</div></div>`).join('')}</div>
+    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':x.acao==='criarReserva'?'<button class="d-acao" data-act="criarReserva">Criar reserva</button>':x.acao==='abrirReserva'?'<button class="d-acao" data-act="abrirReserva">Ajustar meta</button>':x.acao==='meDevem'?`<button class="d-acao" data-act="meDevem" data-pessoa-nome="${esc(x.pessoa)}">Ver e cobrar</button>`:''}</div></div>`).join('')}</div>
     ${dicas.length > 3 ? `<button class="d-mais" data-act="maisDicas">${dicasAbertas?'Mostrar menos':`Ver mais ${dicas.length-3} dica${dicas.length-3>1?'s':''}`}</button>` : ''}</section>`;
 }
 
@@ -1313,10 +1398,10 @@ function baseSimulacao(){
   const parcelasDe = (o) => soma(parcelasDoMes(o.y,o.m), x=>x.valor);
   if (!usados.length){   // sem histórico: projeta o mês atual
     const C = calc(hoje.getFullYear(), hoje.getMonth()), f = diasNoMes(hoje.getFullYear(), hoje.getMonth()) / hoje.getDate();
-    return { renda:C.entradasLanc, folga:C.entradasLanc - C.consumo*f - C.reservas, parcelasMedia:parcelasDe({ y:hoje.getFullYear(), m:hoje.getMonth() }), meses:0 };
+    return { renda:C.renda, folga:C.renda - C.consumo*f - C.reservas, parcelasMedia:parcelasDe({ y:hoje.getFullYear(), m:hoje.getMonth() }), meses:0 };
   }
   const cs = usados.map(o => calc(o.y,o.m)), n = cs.length;
-  const renda = soma(cs, c=>c.entradasLanc)/n, gasto = soma(cs, c=>c.consumo)/n, guardado = soma(cs, c=>Math.max(c.reservas,0))/n;
+  const renda = soma(cs, c=>c.renda)/n, gasto = soma(cs, c=>c.consumo)/n, guardado = soma(cs, c=>Math.max(c.reservas,0))/n;
   return { renda, folga: renda - gasto - guardado, parcelasMedia: soma(usados, parcelasDe)/n, meses:n };
 }
 function simularCompra(valor, credito, n){
@@ -1734,7 +1819,7 @@ function telaLanc(){
     faturasPorCartao(cur.y,cur.m).forEach(f => { h += `<div class="item"><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento}`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></div>`; });
     gs.forEach(g=>{
       const parc = ehParcelado(g);
-      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
+      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
     parcOutras.forEach(x=>{
       h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
@@ -1878,6 +1963,7 @@ function telaMetas(){
   ${cardCofrinhos(false)}
   ${cardCartoes()}
   ${cardDividas()}
+  ${cardMeDevem()}
   ${cardOrcamentos(C)}
   ${cardConquistas()}
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
@@ -1995,6 +2081,11 @@ function abrirForm(tipo, id, mk, opcoes){
       <div class="f"><label>Forma de pagamento</label>${chips('forma',FORMAS,form.v.forma)}</div>
       <div class="f" id="boxCartao" ${form.v.forma==='Crédito' && (S.cartoes||[]).length?'':'hidden'}><label>Cartão</label>${chips('cartao', (S.cartoes||[]).map(c=>c.nome), (cartaoPorId(form.v.cartao)||{}).nome)}</div>
       <div class="f" id="boxParc" ${form.v.forma==='Crédito'?'':'hidden'}><label>Parcelas</label><select id="fParc">${Array.from({length:24},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===form.v.parcelas?'selected':''}>${n===1?'À vista (1x)':n+'x'}</option>`).join('')}</select><div class="note" id="parcInfo"></div></div>
+      ${it ? (it.dividido ? `<p class="note">👥 Dividido com ${esc(it.dividido.join(', '))} · sua parte ${brl(it.minha)}</p>` : '') : `
+      <div class="switch f"><span>👥 Dividir este gasto</span><button type="button" class="tg" data-act="tgDividir" aria-label="Dividir"></button></div>
+      <div class="f" id="boxDividir" hidden><label>Com quem? (separe por vírgula)</label><input id="fPessoas" placeholder="Ex.: Ana, Bruno" autocomplete="off">
+        ${pessoasFrequentes().length?`<div class="chips pessoas" style="margin-top:8px">${pessoasFrequentes().map(x=>`<button type="button" data-addpessoa="${esc(x)}">+ ${esc(x)}</button>`).join('')}</div>`:''}
+        <div class="note" id="divInfo">Escreva os nomes separados por vírgula.</div></div>`}
       <details class="mais" ${it?'open':''}><summary>Descrição, data e essencial</summary>
         <div class="f"><label>Descrição (opcional)</label><input id="fDesc" placeholder="Ex.: Feira da semana" value="${esc(it?it.desc||'':'')}"></div>
         <div class="row2"><div class="f"><label>Data</label><input type="date" id="fData" value="${it?it.data||'':dataPadrao()}"></div>
@@ -2058,6 +2149,9 @@ function salvarForm(){
     const cartao = v.forma==='Crédito' && cartaoPorId(v.cartao) ? v.cartao : undefined;
     if (cartao) S.ultimoCartao = cartao;
     obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao };
+    if (!id && v.dividir){ const ps = nomesDe(g('fPessoas')); if (!ps.length) return toast('Com quem você dividiu?');
+      obj.dividido = ps; obj.minha = Math.round(valor / (ps.length+1) * 100) / 100; }
+    if (id){ const ant = M.gastos.find(x=>x.id===id); if (ant && ant.dividido && ant.valor) obj.minha = Math.round(ant.minha / ant.valor * valor * 100) / 100; }
   }
   if (tipo==='contas'){
     const nome=g('fNome'); if(!nome) return toast('Dê um nome para a conta');
@@ -2074,7 +2168,8 @@ function salvarForm(){
     obj = { tipo: ehCof ? 'Cofrinho' : v.dest, cof: ehCof ? v.dest.slice(4) : undefined, nome:g('fNome'), valor, data:g('fData') };
   }
   if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
-  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo(); }
+  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo();
+    if (tipo==='gastos' && obj.dividido) criarDivisao(M.gastos[M.gastos.length-1], mk || key(cur.y,cur.m)); }
   salvar(); fechar();
   if (aba==='lanc' && subLanc==='calendario') {} else if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
@@ -2110,7 +2205,7 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao],[data-divida]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao],[data-divida],[data-pessoa],[data-addpessoa],[data-setpessoa]');
   if (!t) return;
   if (DEMO && BLOQ_DEMO.has(t.dataset.act)) return toast('Na demonstração isso fica desligado. Compre para usar com seus dados 😉');
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
@@ -2142,6 +2237,9 @@ document.addEventListener('click', e=>{
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
   if (t.dataset.cartao && !t.closest('[data-chips]')){ editarCartao(t.dataset.cartao); return; }
   if (t.dataset.divida){ abrirDivida(t.dataset.divida); return; }
+  if (t.dataset.pessoa){ abrirPessoa(t.dataset.pessoa); return; }
+  if (t.dataset.addpessoa){ const i = document.getElementById('fPessoas'), atuais = nomesDe(i.value); if (!atuais.includes(t.dataset.addpessoa)) i.value = [...atuais, t.dataset.addpessoa].join(', '); infoDivisao(); return; }
+  if (t.dataset.setpessoa){ document.getElementById('rPessoa').value = t.dataset.setpessoa; return; }
   if (t.dataset.impmodo){ imp.modo = t.dataset.impmodo; prepararImportacao(); const top = $sh.scrollTop; desenharImportacao(); $sh.scrollTop = top; return; }
   if (t.dataset.dia){ calSel = { k:key(cur.y,cur.m), d:+t.dataset.dia }; render(); return; }
   if (t.dataset.edit){ abrirForm(t.dataset.edit, t.dataset.id, t.dataset.mk); return; }
@@ -2166,6 +2264,7 @@ document.addEventListener('click', e=>{
     const it = M[form.tipo].find(x=>x.id===form.id);
     if (!confirm(it && ehParcelado(it) ? `Excluir esta compra e todas as ${it.parcelas} parcelas?` : 'Excluir este lançamento?')) return;
     M[form.tipo] = M[form.tipo].filter(x=>x.id!==form.id);
+    if (form.tipo==='gastos') S.aReceber = (S.aReceber||[]).filter(r => r.recebido || r.gastoId !== form.id);
     salvar(); fechar(); render(); toast('Excluído');
   }
   else if (a==='copiarContas'){
@@ -2243,6 +2342,14 @@ document.addEventListener('click', e=>{
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='novoAReceber'){ novoAReceber(); }
+  else if (a==='salvarAReceber'){ salvarAReceber(); }
+  else if (a==='tgEmprestei'){ form.v.emprestei = !form.v.emprestei; t.classList.toggle('on', form.v.emprestei); }
+  else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
+  else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
+  else if (a==='cobrar'){ cobrar(t.dataset.pessoaNome); }
+  else if (a==='tgLancarRec'){ S.lancarRecebidos = S.lancarRecebidos === false; salvar(); t.classList.toggle('on', S.lancarRecebidos !== false); }
+  else if (a==='meDevem'){ abrirPessoa(t.dataset.pessoaNome); }
   else if (a==='novaDivida'){ editarDivida(); }
   else if (a==='editarDivida'){ editarDivida(t.dataset.dividaId); }
   else if (a==='salvarDivida'){ salvarDivida(); }
@@ -2259,7 +2366,7 @@ document.addEventListener('click', e=>{
   else if (a==='salvarCartao'){ salvarCartao(); }
   else if (a==='excluirCartao'){ excluirCartao(); }
   else if (a==='maisDicas'){ dicasAbertas = !dicasAbertas; render(); }
-  else if (a==='guardarAgora'){ const C = calc(hoje.getFullYear(), hoje.getMonth()); abrirForm('reservas'); document.getElementById('fValor').value = moneyVal(Math.round(C.entradasLanc*0.1/10)*10); }
+  else if (a==='guardarAgora'){ const C = calc(hoje.getFullYear(), hoje.getMonth()); abrirForm('reservas'); document.getElementById('fValor').value = moneyVal(Math.round(C.renda*0.1/10)*10); }
   else if (a==='simFechar'){ fechar(); }
   else if (a==='simLancar'){
     const valor = parseValor(document.getElementById('sValor').value), nome = document.getElementById('sNome').value.trim(), credito = form.v.credito, n = credito ? +document.getElementById('sParc').value : 1;
@@ -2424,6 +2531,8 @@ document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
   if (e.target.id==='sValor') atualizarSimulacao();
   if (e.target.id==='pExtra') desenharPlano();
+  if (e.target.id==='fPessoas' || (e.target.id==='fValor' && document.getElementById('divInfo'))) infoDivisao();
+  if (e.target.id==='chavePix'){ S.chavePix = e.target.value.trim(); salvar(); }
   if (e.target.id==='fBusca'){
     busca = e.target.value;
     memo = {}; memoParc = null; memoFat = null;
@@ -2449,7 +2558,7 @@ document.addEventListener('change', e=>{
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && !['cofrinho','simulacao','cartao','divida','pagamentoDivida','plano'].includes(form.tipo) && e.target.tagName==='INPUT') salvarForm(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && !['cofrinho','simulacao','cartao','divida','pagamentoDivida','plano','aReceber'].includes(form.tipo) && e.target.tagName==='INPUT') salvarForm(); });
 
 /* ---------- atualizações ----------
    versao.json diz qual é a versão publicada. Se for mais nova que este código:
@@ -2609,6 +2718,7 @@ function dadosDemo(){
       { id:'note', nome:'Notebook novo', emoji:'💻', alvo:5000, prazo:'' } ],
     orcamentos:{ '🧺 Mercado':900, '🍗 Alimentação':600, '🎉 Lazer':300 },
     cartoes:[{ id:'nubank', nome:'Nubank', fechamento:3, vencimento:10, limite:6000 }],
+    aReceber:[],
     dividas:[{ id:'emp', nome:'Empréstimo pessoal', tipo:'emprestimo', saldo:4800, juros:3.5, parcela:450, venc:15, inicial:8000, criada:'', pagamentos:[] }] });
   const hojeDia = hoje.getDate();
   for (let off = -4; off <= 0; off++){
@@ -2641,6 +2751,9 @@ function dadosDemo(){
     if (6 <= lim){ M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'reserva', valor:300, nome:'Nubank', data:dia(6) });
       M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'viagem', valor:250, nome:'', data:dia(6) }); }
     if (off === -1) M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'note', valor:400, nome:'', data:dia(28) });
+    if (off === 0 && lim >= 9){ const jt = { id:uid(), cat:'🍗 Alimentação', desc:'Jantar com amigos', valor:240, minha:80, dividido:['Ana','Bruno'], forma:'Crédito', cartao:'nubank', data:dia(9), essencial:false, parcelas:1 };
+      M.gastos.push(jt); ['Ana','Bruno'].forEach(p => D.aReceber.push({ id:uid(), pessoa:p, desc:'Jantar com amigos', valor:80, data:jt.data, recebido:false, gastoId:jt.id, mk:k })); }
+    if (off === -1) D.aReceber.push({ id:uid(), pessoa:'Carlos', desc:'Ingresso do show', valor:150, data:dia(12), recebido:false });
     M.auto = true;
   }
   for (let i = 0; i < 9; i++){ const d = new Date(); d.setDate(d.getDate() - i); D.diasAtivos = D.diasAtivos || []; D.diasAtivos.unshift(key(d.getFullYear(),d.getMonth()) + '-' + String(d.getDate()).padStart(2,'0')); }
