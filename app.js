@@ -268,6 +268,7 @@ function telaResumo(){
     ${blocoPrevisao(C)}
   </section>`;
 
+  html += dicaTransferir();
   html += lembreteBackup();
   html += alertasContas();
   html += alertasOrcamento(C);
@@ -317,6 +318,14 @@ function blocoPrevisao(C){
   return h;
 }
 
+// No iPhone, quem usa pelo Safari e depois instala o app começa vazio (são armazenamentos separados).
+const noNavegadorIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
+function dicaTransferir(){
+  if (!noNavegadorIOS() || S.dicaTransfFechada || !primeiraChave()) return '';
+  return `<div class="alert info backup"><span>📲</span><div><b>Vai usar pelo app na tela de início?</b><br>
+    No iPhone, o app instalado não enxerga os dados daqui do Safari. Para levar tudo: toque em <b>Fazer backup</b> → <b>Salvar em Arquivos</b>. Depois abra o app instalado e toque em <b>Restaurar backup</b>.
+    <div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="fecharDicaTransf">Fechar</button></div></div></div>`;
+}
 // Lembrete de backup: os dados ficam só no aparelho.
 const diasDesde = (iso) => iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 864e5) : Infinity;
 function precisaBackup(){
@@ -628,7 +637,7 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Último backup: <b>${S.ultimoBackup ? new Date(S.ultimoBackup).toLocaleDateString('pt-BR') + ` (${diasDesde(S.ultimoBackup)===0?'hoje':'há '+diasDesde(S.ultimoBackup)+' dias'})` : 'nunca'}</b>${S.novosDesdeBackup?` · ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} desde então`:''}</p>
     <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
     <button class="btn sec" data-act="importar">⬆️ Restaurar backup</button>
-    <input type="file" id="fileImp" accept="application/json,.json" hidden></section>
+    <input type="file" id="fileImp" hidden></section>
   <section class="card"><h3>Exportar para Excel</h3>
     <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
     <button class="btn sec" data-act="exportarCsv">📊 Exportar lançamentos</button>
@@ -866,6 +875,7 @@ document.addEventListener('click', e=>{
   }
   else if (a==='exportar'){ fazerBackup(); }
   else if (a==='exportarCsv'){ exportarCsv(); }
+  else if (a==='fecharDicaTransf'){ S.dicaTransfFechada = true; salvar(); render(); }
   else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
   else if (a==='zerar'){
@@ -951,7 +961,7 @@ document.addEventListener('change', e=>{
   r.onload = () => { try {
       const d = JSON.parse(r.result); if (!d.meses || !d.perfil) throw 0;
       if (!confirm('Substituir os dados atuais pelo backup?')) return;
-      d.liberado = S.liberado || d.liberado; delete d.backupEm; S = d; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
+      d.liberado = S.liberado || d.liberado; delete d.backupEm; S = d; aba = 'resumo'; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
@@ -969,6 +979,8 @@ function renderOnboarding(){
     <div class="f"><label>Quanto custa</label><input id="oMetaV" inputmode="decimal" placeholder="R$ 0,00"></div></div>
     <div class="f"><label>Quero guardar de reserva de emergência</label><input id="oRes" inputmode="decimal" placeholder="R$ 0,00"></div>
     <button class="btn pri" data-act="onbOk">Começar</button>
+    <button class="btn link" data-act="importar">Já usava o app em outro lugar? <b>Restaurar backup</b></button>
+    <input type="file" id="fileImp" hidden>
   </div></div>`;
 }
 function renderAcesso(){
