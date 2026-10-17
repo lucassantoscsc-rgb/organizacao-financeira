@@ -9,7 +9,7 @@ const CONFIG = {
   // A conferência é feita no servidor (api/liberar.js).
   exigirCodigo: true,
   // Link que aparece na imagem da retrospectiva compartilhada (ex.: sua página de vendas). Vazio = só o nome do app.
-  linkDivulgacao: '',
+  linkDivulgacao: 'planilhadeorganizacaofinanceira.online',
   frases: [
     'Pequenas ações geram grandes resultados.',
     'Quem anota, controla. Quem controla, conquista.',
@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 18;
+const APP_VERSAO = 19;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -77,8 +77,10 @@ let evoSel = null;
 let busca = '';      // texto da busca em Lançamentos   // mês destacado no gráfico de evolução
 
 /* ---------- utilidades ---------- */
-const brl = (n) => (n<0?'-':'') + 'R$ ' + Math.abs(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-const brl0 = (n) => (n<0?'-':'') + 'R$ ' + Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
+// Com "esconder valores" ligado (👁️ no topo), todo valor em reais aparece como R$ •••••.
+const OCULTO = 'R$ •••••';
+const brl = (n) => S.ocultar ? OCULTO : (n<0?'-':'') + 'R$ ' + Math.abs(n||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const brl0 = (n) => S.ocultar ? OCULTO : (n<0?'-':'') + 'R$ ' + Math.abs(Math.round(n||0)).toLocaleString('pt-BR');
 function parseValor(s){
   if (typeof s === 'number') return s;
   s = String(s||'').replace(/R\$|\s/g,'');
@@ -162,6 +164,123 @@ function aplicarRecorrentes(y,m){
   salvar();
 }
 
+/* ---------- privacidade: senha e Face ID ----------
+   Trava de privacidade local (como nos apps de banco): pede a senha ao abrir e ao voltar
+   depois de 1 minuto. A senha é guardada só como hash. Face ID/digital via WebAuthn do aparelho. */
+const TEMPO_TRAVA = 60e3;
+let travado = false, saiuEm = 0, tentativas = 0, esperaAte = 0;
+const temSenha = () => !!(S.seguranca && S.seguranca.hash);
+const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const deB64 = (t) => Uint8Array.from(atob(t), c => c.charCodeAt(0));
+async function hashSenha(pin, sal){
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(sal + ':' + pin));
+  return [...new Uint8Array(d)].map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+async function bioDisponivel(){
+  try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch(e){ return false; }
+}
+async function bioCadastrar(){
+  const cred = await navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)),
+    rp: { name: CONFIG.nomeApp },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: S.conta || 'usuario', displayName: S.perfil.nome || 'Você' },
+    pubKeyCredParams: [{ type:'public-key', alg:-7 }, { type:'public-key', alg:-257 }],
+    authenticatorSelection: { authenticatorAttachment:'platform', userVerification:'required', residentKey:'discouraged' },
+    timeout: 60000 } });
+  S.seguranca.bio = b64(cred.rawId); salvar();
+}
+async function bioVerificar(){
+  await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials: [{ type:'public-key', id: deB64(S.seguranca.bio) }], userVerification:'required', timeout:60000 } });
+}
+function cardPrivacidade(){
+  const seg = S.seguranca || {};
+  return `<section class="card"><h3>Privacidade</h3>
+    <div class="switch"><span>Esconder valores <small class="muted">(também pelo 👁️ no topo)</small></span><button class="tg ${S.ocultar?'on':''}" data-act="olho" aria-label="Esconder valores"></button></div>
+    <div class="switch" style="margin-top:6px"><span>Bloquear com senha</span><button class="tg ${temSenha()?'on':''}" data-act="${temSenha()?'removerSenha':'criarSenha'}" aria-label="Bloquear com senha"></button></div>
+    ${temSenha() ? `<div class="switch" id="linhaBio" style="margin-top:6px" hidden><span>Destravar com Face ID / digital</span><button class="tg ${seg.bio?'on':''}" data-act="bio" aria-label="Face ID"></button></div>
+      <button class="btn sec" data-act="trocarSenha" style="margin-top:10px">Trocar senha</button>` : ''}
+    <p class="note">${temSenha() ? 'O app pede a senha ao abrir e quando você volta depois de 1 minuto fora.' : 'Peça uma senha de 4 dígitos para abrir o app, como nos apps de banco.'}</p></section>`;
+}
+// Teclado numérico para criar ou digitar a senha. modo: 'criar' | 'confirmar' | 'destravar'
+let pinAtual = '', pinModo = null, pinPrimeiro = '';
+function telaPin(modo, msg){
+  pinModo = modo; pinAtual = '';
+  let el = document.getElementById('trava');
+  if (!el){ el = document.createElement('div'); el.id = 'trava'; el.setAttribute('role','dialog'); el.setAttribute('aria-modal','true'); document.body.appendChild(el); }
+  const titulo = modo==='criar' ? 'Crie uma senha de 4 dígitos' : modo==='confirmar' ? 'Digite a senha de novo' : 'Digite sua senha';
+  el.innerHTML = `<div class="t-in">
+    <img class="logo" src="icons/icon-192.png" alt="">
+    <h2>${titulo}</h2><p class="t-msg" aria-live="assertive">${msg||''}</p>
+    <div class="pontos">${[0,1,2,3].map(i=>`<span data-p="${i}"></span>`).join('')}</div>
+    <div class="teclado">${[1,2,3,4,5,6,7,8,9].map(n=>`<button data-pin="${n}">${n}</button>`).join('')}
+      ${modo==='destravar' && S.seguranca.bio ? '<button data-pin="bio" aria-label="Face ID ou digital">🙂</button>' : '<span></span>'}
+      <button data-pin="0">0</button><button data-pin="apagar" aria-label="Apagar">⌫</button></div>
+    ${modo==='destravar' ? '<button class="t-link" data-pin="esqueci">Esqueci a senha</button>' : '<button class="t-link" data-pin="cancelar">Cancelar</button>'}
+  </div>`;
+  desenharPontos();
+}
+function desenharPontos(){ document.querySelectorAll('#trava .pontos span').forEach((p,i)=>p.classList.toggle('on', i < pinAtual.length)); }
+function fecharTrava(){ const el = document.getElementById('trava'); if (el) el.remove(); pinModo = null; }
+function errouPin(msg){
+  const el = document.querySelector('#trava .pontos'); el.classList.remove('treme'); void el.offsetWidth; el.classList.add('treme');
+  document.querySelector('#trava .t-msg').textContent = msg; pinAtual = ''; setTimeout(desenharPontos, 300);
+}
+async function digitoPin(d){
+  if (Date.now() < esperaAte) return errouPin(`Muitas tentativas. Aguarde ${Math.ceil((esperaAte-Date.now())/1000)} s.`);
+  if (pinAtual.length >= 4) return;
+  pinAtual += d; desenharPontos();
+  if (pinAtual.length < 4) return;
+  const pin = pinAtual;
+  if (pinModo === 'criar'){ pinPrimeiro = pin; setTimeout(() => telaPin('confirmar'), 150); return; }
+  if (pinModo === 'confirmar'){
+    if (pin !== pinPrimeiro) return setTimeout(() => telaPin('criar', 'As senhas não batem. Tente de novo.'), 300);
+    const sal = b64(crypto.getRandomValues(new Uint8Array(16)));
+    S.seguranca = { ...(S.seguranca||{}), sal, hash: await hashSenha(pin, sal) }; salvar(); fecharTrava(); render();
+    toast('Senha criada ✓');
+    if (await bioDisponivel() && confirm('Quer destravar também com Face ID ou digital?')) { try { await bioCadastrar(); toast('Face ID/digital ativado ✓'); } catch(e){ toast('Não foi possível ativar agora.'); } render(); }
+    return;
+  }
+  // destravar
+  if (await hashSenha(pin, S.seguranca.sal) === S.seguranca.hash){ tentativas = 0; destravar(); }
+  else { tentativas++; if (tentativas >= 5){ esperaAte = Date.now() + 30e3; tentativas = 0; return errouPin('Muitas tentativas. Aguarde 30 s.'); } errouPin('Senha incorreta'); }
+}
+function travar(){
+  if (!temSenha() || travado) return;
+  travado = true; fechar(); telaPin('destravar');
+  if (S.seguranca.bio) setTimeout(tentarBio, 300);
+}
+async function tentarBio(){ try { await bioVerificar(); destravar(); } catch(e){} }
+function destravar(){ travado = false; fecharTrava(); render(); aoDestravar && aoDestravar(); aoDestravar = null; }
+let aoDestravar = null;
+async function esqueciSenha(){
+  const email = prompt('Para remover a senha, digite o e-mail (ou código) da sua compra:');
+  if (!email) return;
+  try {
+    const r = await fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ codigo:email, aparelho:idAparelho(), nome:nomeAparelho() }) });
+    const d = await r.json();
+    if (r.ok && d.ok){ delete S.seguranca; salvar(); destravar(); toast('Senha removida. Crie uma nova em Ajustes.'); }
+    else errouPin(d.erro || 'E-mail não confere.');
+  } catch(e){ errouPin('Sem internet. Conecte-se para recuperar.'); }
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('#trava [data-pin]'); if (!b) return;
+  e.stopPropagation();
+  const v = b.dataset.pin;
+  if (v === 'apagar'){ pinAtual = pinAtual.slice(0,-1); desenharPontos(); }
+  else if (v === 'bio') tentarBio();
+  else if (v === 'esqueci') esqueciSenha();
+  else if (v === 'cancelar') fecharTrava();
+  else digitoPin(v);
+}, true);
+document.addEventListener('keydown', e => { if (!pinModo) return; if (/^\d$/.test(e.key)) digitoPin(e.key); else if (e.key === 'Backspace'){ pinAtual = pinAtual.slice(0,-1); desenharPontos(); } });
+// Ao sair do app, borra a tela (a miniatura do alternador de apps não mostra valores) e marca a hora.
+document.addEventListener('visibilitychange', () => {
+  if (!temSenha()) return;
+  if (document.visibilityState === 'hidden'){ saiuEm = Date.now(); document.body.classList.add('privado'); }
+  else { document.body.classList.remove('privado'); if (saiuEm && Date.now() - saiuEm > TEMPO_TRAVA) travar(); }
+});
+
 /* ---------- sequência e conquistas ---------- */
 // Dias em que a pessoa lançou algo (para a sequência 🔥).
 function registrarDiaAtivo(){
@@ -215,7 +334,7 @@ function contextoConquistas(){
 // Confere e comemora conquistas novas.
 let conqPendente = false;
 function checarConquistas(){
-  if (!S.liberado || !S.perfil.ok || tour !== null) return;
+  if (!S.liberado || !S.perfil.ok || tour !== null || travado) return;
   // Espera janelas abertas (novidades, formulários, retrospectiva) fecharem.
   if ($ov.classList.contains('open') || retro){ conqPendente = true; return; }
   S.conquistas = S.conquistas || {};
@@ -595,11 +714,14 @@ const ICON = {
   contas:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8l2 2 4-4M8 15h8"/></svg>',
   metas:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/></svg>',
   ajustes:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
+  olho:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
+  olhoFechado:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
   plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
 };
 
 function render(){
   memo = {}; memoParc = null;
+  if (aba==='ajustes' && temSenha()) bioDisponivel().then(ok => { const l = document.getElementById('linhaBio'); if (l) l.hidden = !ok; });
   if (CONFIG.exigirCodigo && !S.liberado) return renderAcesso();
   if (!S.perfil.ok) return renderOnboarding();
   aplicarRecorrentes(cur.y,cur.m);
@@ -609,6 +731,7 @@ function render(){
   const telas = { resumo:telaResumo, lanc:telaLanc, contas:telaContas, metas:telaMetas, ajustes:telaAjustes };
   $app.innerHTML = `
     <header class="top ${aba==='resumo'?'hero-top':''}">
+      <button class="olho" data-act="olho" aria-label="${S.ocultar?'Mostrar valores':'Esconder valores'}" aria-pressed="${!!S.ocultar}">${S.ocultar ? ICON.olhoFechado : ICON.olho}</button>
       <div class="hello">Olá, ${esc(p.nome||'você')}!${sequenciaAtual()>=1?`<button class="streak" data-tab="metas" aria-label="Sequência de ${sequenciaAtual()} dias">🔥 ${sequenciaAtual()}</button>`:''}</div>
       <div class="sub">${aba==='resumo' ? esc(frase) : saud + ' de volta'}</div>
       <div class="monthbar">
@@ -641,7 +764,7 @@ function telaResumo(){
   let html = `
   <section class="card hero">
     <div class="lbl">Restante para gastar</div>
-    <div class="big num ${neg?'neg':''}">${brl(C.restante)}</div>
+    <div class="big num ${neg && !S.ocultar?'neg':''}">${brl(C.restante)}</div>
     <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas</div>
     ${blocoPrevisao(C)}
   </section>`;
@@ -688,8 +811,8 @@ function blocoPrevisao(C){
   const ritmo = (C.gastosVista) / d;
   const fim = livre - ritmo * (rest - 1);
   let h = `<div class="prev">
-    <div><span>Pode gastar por dia</span><b class="num ${porDia<0?'neg':''}">${brl(Math.max(porDia,0))}</b><small>pelos próximos ${rest} dia${rest>1?'s':''}</small></div>
-    <div><span>No ritmo atual</span><b class="num ${fim<0?'neg':''}">${brl(fim)}</b><small>no fim do mês (${brl0(ritmo)}/dia)</small></div>
+    <div><span>Pode gastar por dia</span><b class="num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</b><small>pelos próximos ${rest} dia${rest>1?'s':''}</small></div>
+    <div><span>No ritmo atual</span><b class="num ${fim<0 && !S.ocultar?'neg':''}">${brl(fim)}</b><small>no fim do mês (${brl0(ritmo)}/dia)</small></div>
   </div>`;
   if (C.contasPend > 0) h += `<div class="eq">Já descontando ${brl(C.contasPend)} de contas a pagar.</div>`;
   const fut = comprometidoFuturo();
@@ -825,7 +948,7 @@ function abrirCategoria(c){
   if (lim) { const y = base-(base-top)*lim/max; svg += `<line x1="0" x2="${W}" y1="${y}" y2="${y}" class="lim-l"/>`; }
   vals.forEach((x,i)=>{ const cx = slot*i+slot/2, h=(base-top)*x.v/max, on = x.k===key(cur.y,cur.m);
     svg += barra(cx-bw/2, bw, h, base, on?'b-cat on':'b-cat');
-    if (x.v>0) svg += `<text x="${cx}" y="${base-h-5}" text-anchor="middle" class="lbl-v">${brl0(x.v)}</text>`;
+    if (x.v>0 && !S.ocultar) svg += `<text x="${cx}" y="${base-h-5}" text-anchor="middle" class="lbl-v">${brl0(x.v)}</text>`;
     svg += `<text x="${cx}" y="${base+16}" text-anchor="middle" class="lbl-m">${MES_CURTO[x.o.m]}</text>`; });
   svg += `</svg>`;
   // lançamentos do mês nesta categoria
@@ -1064,6 +1187,7 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
     <button class="btn sec" data-act="exportarCsv">📊 Exportar lançamentos</button>
 </section>
+  ${cardPrivacidade()}
   <section class="card"><h3>Conta</h3>
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
     ${S.conta ? '<button class="btn sec" data-act="aparelhos">📱 Aparelhos conectados</button>' : '<p class="note" style="margin:0 0 12px">Para ver e gerenciar seus aparelhos, saia e entre de novo com seu e-mail (seus dados ficam guardados).</p>'}
@@ -1335,6 +1459,13 @@ document.addEventListener('click', e=>{
   else if (a==='tgRetirada'){ form.v.retirada=!form.v.retirada; t.classList.toggle('on',form.v.retirada); }
   else if (a==='ouvir'){ ouvirFrase(t); }
   else if (a==='retro'){ abrirRetro(+t.dataset.y, +t.dataset.m); }
+  else if (a==='olho'){ S.ocultar = !S.ocultar; salvar(); render(); toast(S.ocultar ? 'Valores escondidos 👁️' : 'Valores visíveis'); }
+  else if (a==='criarSenha' || a==='trocarSenha'){ telaPin('criar'); }
+  else if (a==='removerSenha'){ if (confirm('Remover a senha do app?')){ delete S.seguranca; salvar(); render(); toast('Senha removida'); } }
+  else if (a==='bio'){
+    if (S.seguranca.bio){ delete S.seguranca.bio; salvar(); render(); }
+    else bioCadastrar().then(()=>{ toast('Face ID/digital ativado ✓'); render(); }).catch(()=>toast('Não foi possível ativar neste aparelho.'));
+  }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
@@ -1419,6 +1550,7 @@ function sairDaConta(){
   try { localStorage.setItem(CONTA_KEY(S.conta), JSON.stringify(S)); } catch(e){ return toast('Não foi possível guardar os dados. Faça um backup antes de sair.'); }
   S = novoEstado(); aba = 'resumo'; busca = ''; salvar(); render();
 }
+
 
 // Entrega um arquivo: no celular, abre o menu de compartilhar (salvar em Arquivos, Drive, WhatsApp, e-mail);
 // onde não houver, baixa o arquivo.
@@ -1642,12 +1774,15 @@ function renderAcesso(){
   </div></div>`;
 }
 
+function iniciarApp(){
+  if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
+  mostrarNovidades();
+  setTimeout(checarConquistas, 1200);
+}
 render();
-if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
+if (S.liberado && S.perfil.ok && temSenha()){ aoDestravar = iniciarApp; travar(); } else iniciarApp();
 verificarAcesso();
 checarVersao(false);
-mostrarNovidades();
-setTimeout(checarConquistas, 1200);
 window.addEventListener('online', verificarAcesso);
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

@@ -1,6 +1,7 @@
 {
-  "versao": 18,
+  "versao": 19,
   "novidades": [
-    "🎤 Lançar por voz no iPhone: toque no 🎤 e use o microfone do teclado. O app preenche sozinho quando você para de falar."
+    "👁️ Esconder valores: toque no olho no topo e todos os valores ficam escondidos.",
+    "🔒 Bloqueio com senha (e Face ID/digital, onde o aparelho permitir). Ative em Ajustes → Privacidade."
   ]
 }
