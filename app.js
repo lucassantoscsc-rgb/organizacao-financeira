@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 17;
+const APP_VERSAO = 18;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -482,17 +482,36 @@ function aplicarFrase(frase){
   if (info) info.innerHTML = partes.length ? `✓ Entendi: <b>${esc(partes.join(' · '))}</b>${r.tipo==='gastos' && !r.cat ? ' — escolha a categoria' : ''}${!r.valor ? ' — falta o valor' : ''}` : 'Não entendi. Tente algo como “gastei 45 no mercado”.';
 }
 const Reconhecedor = window.SpeechRecognition || window.webkitSpeechRecognition;
+const ehIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+// No iPhone o reconhecimento de voz do navegador costuma não responder (principalmente no app instalado).
+// Lá usamos o ditado do teclado: o campo recebe o texto e a frase é aplicada quando a pessoa para de falar.
+function usarDitadoDoTeclado(){
+  const i = document.getElementById('fFrase'), info = document.getElementById('fraseInfo');
+  if (!i) return;
+  i.focus();
+  if (info) info.innerHTML = '🎤 Toque no <b>microfone do teclado</b> e fale. Ex.: “gastei 45 no mercado no crédito”.';
+}
 function ouvirFrase(btn){
-  if (!Reconhecedor) return toast('Seu navegador não tem reconhecimento de voz. Use o microfone do teclado.');
+  if (ehIOS || !Reconhecedor) return usarDitadoDoTeclado();
   const r = new Reconhecedor(); r.lang = 'pt-BR'; r.interimResults = false; r.maxAlternatives = 1;
+  let comecou = false;
   btn.classList.add('gravando');
-  r.onresult = (e) => { const txt = e.results[0][0].transcript; const i = document.getElementById('fFrase'); if (i) i.value = txt; aplicarFrase(txt); };
-  r.onerror = (e) => { if (e.error !== 'no-speech' && e.error !== 'aborted') toast(e.error === 'not-allowed' ? 'Permita o uso do microfone para falar.' : 'Não consegui ouvir. Tente de novo.'); };
+  const info = document.getElementById('fraseInfo'); if (info) info.textContent = '🎙️ Ouvindo… fale a frase.';
+  r.onstart = () => { comecou = true; };
+  r.onresult = (e) => { const txt = e.results[0][0].transcript; const i = document.getElementById('fFrase'); if (i){ i.value = txt; i.dataset.aplicado = txt; } aplicarFrase(txt); };
+  r.onerror = (e) => {
+    btn.classList.remove('gravando');
+    if (e.error === 'no-speech' || e.error === 'aborted') { if (info) info.textContent = 'Não ouvi nada. Toque no 🎤 e fale de novo.'; return; }
+    usarDitadoDoTeclado();
+    if (e.error === 'not-allowed') toast('Permita o microfone, ou use o microfone do teclado.');
+  };
   r.onend = () => btn.classList.remove('gravando');
-  try { r.start(); } catch(e){ btn.classList.remove('gravando'); }
+  // Se o navegador não responder em 2 s, cai para o ditado do teclado.
+  setTimeout(() => { if (!comecou){ try { r.abort(); } catch(_){} btn.classList.remove('gravando'); usarDitadoDoTeclado(); } }, 2000);
+  try { r.start(); } catch(e){ btn.classList.remove('gravando'); usarDitadoDoTeclado(); }
 }
 const blocoFrase = () => `<div class="frase"><input id="fFrase" enterkeyhint="done" autocomplete="off" placeholder="✨ Ex.: gastei 45 no ifood no crédito">
-  ${Reconhecedor ? '<button type="button" class="mic" data-act="ouvir" aria-label="Falar">🎤</button>' : ''}</div><div class="frase-info" id="fraseInfo"></div>`;
+  <button type="button" class="mic" data-act="ouvir" aria-label="Falar a frase">🎤</button></div><div class="frase-info" id="fraseInfo"></div>`;
 
 /* ---------- cofrinhos ----------
    Cada reserva pode ir para um cofrinho (campo cof). Reservas antigas usam o tipo. Retiradas são valores negativos. */
@@ -1454,6 +1473,13 @@ document.addEventListener('input', e=>{
   el.value = digitos ? (parseInt(digitos,10)/100).toLocaleString('pt-BR',{minimumFractionDigits:2, maximumFractionDigits:2}) : '';
   try { el.setSelectionRange(el.value.length, el.value.length); } catch(_){}
 }, true);
+let esperaFrase = null;
+document.addEventListener('input', e=>{
+  if (e.target.id !== 'fFrase') return;
+  clearTimeout(esperaFrase);
+  const el = e.target;
+  esperaFrase = setTimeout(() => { if (el.value.trim() && el.dataset.aplicado !== el.value){ el.dataset.aplicado = el.value; aplicarFrase(el.value); } }, 1200);
+});
 document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
@@ -1476,7 +1502,7 @@ document.addEventListener('change', e=>{
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && e.target.tagName==='INPUT') salvarForm(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && e.target.tagName==='INPUT') salvarForm(); });
 
 /* ---------- atualizações ----------
    versao.json diz qual é a versão publicada. Se for mais nova que este código:
