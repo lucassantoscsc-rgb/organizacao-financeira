@@ -18,6 +18,8 @@ const CONFIG = {
 };
 
 const STORE_KEY = 'orgfin:v1';
+// Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
+const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
 const MESES = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 const MES_CURTO = ['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'];
 const CATEGORIAS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','🍗 Alimentação','⛽ Gasolina','🚗 Transporte','🏠 Casa','💊 Saúde',
@@ -642,6 +644,9 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
     <button class="btn sec" data-act="exportarCsv">📊 Exportar lançamentos</button>
 </section>
+  <section class="card"><h3>Conta</h3>
+    <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
+    <button class="btn sec" data-act="sair">Sair da conta</button></section>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
 
@@ -875,12 +880,13 @@ document.addEventListener('click', e=>{
   }
   else if (a==='exportar'){ fazerBackup(); }
   else if (a==='exportarCsv'){ exportarCsv(); }
+  else if (a==='sair'){ sairDaConta(); }
   else if (a==='fecharDicaTransf'){ S.dicaTransfFechada = true; salvar(); render(); }
   else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
   else if (a==='zerar'){
     if (!confirm('Apagar TODOS os dados deste aparelho? Isso não pode ser desfeito.')) return;
-    const lib = S.liberado; S = novoEstado(); S.liberado = lib; salvar(); aba='resumo'; render();
+    const lib = S.liberado, conta = S.conta; S = novoEstado(); S.liberado = lib; S.conta = conta; salvar(); aba='resumo'; render();
   }
   else if (a==='onbOk'){
     const v=(i)=>document.getElementById(i).value.trim();
@@ -894,10 +900,31 @@ document.addEventListener('click', e=>{
     if (!c) return toast('Digite o e-mail da compra');
     fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c, aparelho:idAparelho()}) })
       .then(r => r.json().then(d => ({ok:r.ok, d})))
-      .then(({ok,d}) => { if (ok && d.ok){ S.liberado=true; salvar(); render(); } else toast(d.erro || 'Código inválido'); })
+      .then(({ok,d}) => { if (ok && d.ok) entrarNaConta(c); else toast(d.erro || 'Código inválido'); })
       .catch(() => toast('Sem internet. Conecte-se para liberar o acesso.'));
   }
 });
+
+// Contas no mesmo aparelho: ao entrar, recupera os dados guardados daquela conta (se houver).
+const idConta = (c) => { c = String(c||'').trim(); return c.includes('@') ? c.toLowerCase() : c.toUpperCase(); };
+function entrarNaConta(c){
+  const id = idConta(c);
+  let guardado = null;
+  try {
+    guardado = localStorage.getItem(CONTA_KEY(id));
+    if (guardado) localStorage.removeItem(CONTA_KEY(id));
+    else if ((guardado = localStorage.getItem(CONTA_KEY()))) localStorage.removeItem(CONTA_KEY());   // dados de antes de existir "sair"
+  } catch(e){}
+  if (guardado){ try { S = JSON.parse(guardado); } catch(e){ S = novoEstado(); } }
+  else if (S.conta && S.conta !== id) S = novoEstado();
+  S.liberado = true; S.conta = id; migrar(); aba = 'resumo'; salvar(); render();
+  if (guardado) toast('Bem-vindo de volta! Seus dados foram recuperados ✓');
+}
+function sairDaConta(){
+  if (!confirm('Sair da conta neste aparelho?\n\nSeus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail.')) return;
+  try { localStorage.setItem(CONTA_KEY(S.conta), JSON.stringify(S)); } catch(e){ return toast('Não foi possível guardar os dados. Faça um backup antes de sair.'); }
+  S = novoEstado(); aba = 'resumo'; busca = ''; salvar(); render();
+}
 
 // Entrega um arquivo: no celular, abre o menu de compartilhar (salvar em Arquivos, Drive, WhatsApp, e-mail);
 // onde não houver, baixa o arquivo.
@@ -961,7 +988,7 @@ document.addEventListener('change', e=>{
   r.onload = () => { try {
       const d = JSON.parse(r.result); if (!d.meses || !d.perfil) throw 0;
       if (!confirm('Substituir os dados atuais pelo backup?')) return;
-      d.liberado = S.liberado || d.liberado; delete d.backupEm; S = d; aba = 'resumo'; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
+      d.liberado = S.liberado || d.liberado; d.conta = S.conta || d.conta; delete d.backupEm; S = d; aba = 'resumo'; migrar(); S.novosDesdeBackup = 0; S.ultimoBackup = S.ultimoBackup || new Date().toISOString(); salvar(); render(); toast('Backup restaurado ✓');
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
