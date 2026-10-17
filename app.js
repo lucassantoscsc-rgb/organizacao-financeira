@@ -646,6 +646,7 @@ function telaAjustes(){
 </section>
   <section class="card"><h3>Conta</h3>
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
+    ${S.conta ? '<button class="btn sec" data-act="aparelhos">📱 Aparelhos conectados</button>' : '<p class="note" style="margin:0 0 12px">Para ver e gerenciar seus aparelhos, saia e entre de novo com seu e-mail (seus dados ficam guardados).</p>'}
     <button class="btn sec" data-act="sair">Sair da conta</button></section>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
@@ -881,6 +882,8 @@ document.addEventListener('click', e=>{
   else if (a==='exportar'){ fazerBackup(); }
   else if (a==='exportarCsv'){ exportarCsv(); }
   else if (a==='sair'){ sairDaConta(); }
+  else if (a==='aparelhos'){ abrirAparelhos(); }
+  else if (a==='removerAp'){ if (confirm(`Remover “${t.dataset.nome}” da sua conta?`)) carregarAparelhos('remover', t.dataset.alvo); }
   else if (a==='fecharDicaTransf'){ S.dicaTransfFechada = true; salvar(); render(); }
   else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
@@ -898,12 +901,65 @@ document.addEventListener('click', e=>{
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
     if (!c) return toast('Digite o e-mail da compra');
-    fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c, aparelho:idAparelho()}) })
+    fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({codigo:c, aparelho:idAparelho(), nome:nomeAparelho()}) })
       .then(r => r.json().then(d => ({ok:r.ok, d})))
       .then(({ok,d}) => { if (ok && d.ok) entrarNaConta(c); else toast(d.erro || 'Código inválido'); })
       .catch(() => toast('Sem internet. Conecte-se para liberar o acesso.'));
   }
 });
+
+// Nome amigável deste aparelho para a lista de "Aparelhos conectados".
+function nomeAparelho(){
+  const ua = navigator.userAgent;
+  const instalado = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  const sist = /iphone/i.test(ua) ? 'iPhone' : /ipad/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1) ? 'iPad'
+    : /android/i.test(ua) ? 'Android' : /windows/i.test(ua) ? 'Computador Windows' : /mac os/i.test(ua) ? 'Mac' : 'Computador';
+  if (instalado) return `${sist} · App instalado`;
+  const nav = /SamsungBrowser/.test(ua) ? 'Samsung Internet' : /Edg/.test(ua) ? 'Edge' : /CriOS|Chrome/.test(ua) ? 'Chrome'
+    : /FxiOS|Firefox/.test(ua) ? 'Firefox' : /Safari/.test(ua) ? 'Safari' : 'Navegador';
+  return `${sist} · ${nav}`;
+}
+const apiAparelhos = (dados) => fetch('api/aparelhos', { method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), nome:nomeAparelho(), ...dados }) })
+  .then(r => r.json().then(d => ({ status:r.status, d })));
+
+// Ao abrir com internet (no máximo a cada 6 horas), confere se este aparelho ainda tem acesso.
+// Desconecta se foi removido pelo dono, se o acesso foi excluído ou reembolsado. Erros de rede são ignorados.
+function verificarAcesso(){
+  if (!CONFIG.exigirCodigo || !S.liberado || !S.conta || !navigator.onLine) return;
+  if (S.verificadoEm && Date.now() - new Date(S.verificadoEm).getTime() < 6*3600e3) return;
+  apiAparelhos({ acao:'verificar' }).then(({status,d}) => {
+    if (status === 403) desconectar(d.motivo === 'removido'
+      ? 'Este aparelho foi removido da sua conta. Para usar aqui de novo, entre com seu e-mail.'
+      : 'Seu acesso não está mais ativo. Se acha que é um engano, fale com o suporte.');
+    else if (d && d.ok){ S.verificadoEm = new Date().toISOString(); salvar(); }
+  }).catch(()=>{});
+}
+function desconectar(msg){
+  try { localStorage.setItem(CONTA_KEY(S.conta), JSON.stringify({ ...S, liberado:false, verificadoEm:null })); } catch(e){}
+  S = novoEstado(); fechar(); aba = 'resumo'; salvar(); render(); alert(msg);
+}
+
+// Lista de aparelhos conectados (Ajustes → Conta).
+function abrirAparelhos(){
+  abrir(`<h2>Aparelhos conectados</h2><div id="listaAp"><div class="empty">Carregando…</div></div>`);
+  carregarAparelhos();
+}
+function carregarAparelhos(acao, alvo){
+  const box = () => document.getElementById('listaAp');
+  apiAparelhos(acao ? { acao, alvo } : { acao:'listar' }).then(({status,d}) => {
+    if (!box()) return;
+    if (status === 403) return desconectar('Este aparelho não está mais conectado à sua conta. Entre de novo com seu e-mail.');
+    if (!d.ok) return box().innerHTML = `<div class="empty">${esc(d.erro || 'Não foi possível carregar.')}</div>`;
+    if (d.fixo) return box().innerHTML = `<div class="empty">Este código de acesso não tem controle de aparelhos.</div>`;
+    const quando = (iso) => iso ? new Date(iso).toLocaleDateString('pt-BR') : '—';
+    box().innerHTML = `<p class="note" style="margin:-6px 0 12px">${d.lista.length} de ${d.max} aparelhos em uso. Remover um aparelho libera a vaga; ele é desconectado na próxima vez que abrir o app com internet.</p>
+      <div class="list flat">${d.lista.sort((a,b)=>b.atual-a.atual).map(x=>`<div class="item"><div class="ic">${/iPhone|Android|iPad/.test(x.nome)?'📱':'💻'}</div>
+        <div class="tx"><div class="t1">${esc(x.nome)}</div><div class="t2">${x.atual?'<span class="tag auto" style="margin:0 4px 0 0">este aparelho</span>':''}Desde ${quando(x.desde)} · último uso ${quando(x.visto)}</div></div>
+        ${x.atual?'':`<button class="btn dan mini" data-act="removerAp" data-alvo="${x.id}" data-nome="${esc(x.nome)}">Remover</button>`}</div>`).join('')}</div>`;
+    if (acao === 'remover') toast('Aparelho removido ✓');
+  }).catch(() => { if (box()) box().innerHTML = '<div class="empty">Sem internet. Conecte-se para ver seus aparelhos.</div>'; });
+}
 
 // Contas no mesmo aparelho: ao entrar, recupera os dados guardados daquela conta (se houver).
 const idConta = (c) => { c = String(c||'').trim(); return c.includes('@') ? c.toLowerCase() : c.toUpperCase(); };
@@ -917,7 +973,7 @@ function entrarNaConta(c){
   } catch(e){}
   if (guardado){ try { S = JSON.parse(guardado); } catch(e){ S = novoEstado(); } }
   else if (S.conta && S.conta !== id) S = novoEstado();
-  S.liberado = true; S.conta = id; migrar(); aba = 'resumo'; salvar(); render();
+  S.liberado = true; S.conta = id; S.verificadoEm = new Date().toISOString(); migrar(); aba = 'resumo'; salvar(); render();
   if (guardado) toast('Bem-vindo de volta! Seus dados foram recuperados ✓');
 }
 function sairDaConta(){
@@ -1029,6 +1085,9 @@ function renderAcesso(){
 }
 
 render();
+verificarAcesso();
+window.addEventListener('online', verificarAcesso);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }

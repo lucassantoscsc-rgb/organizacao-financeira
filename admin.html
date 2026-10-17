@@ -128,8 +128,8 @@ document.getElementById('copiar').onclick = async () => {
 document.getElementById('lista').onclick = async e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const c = b.dataset.c;
-  if (b.dataset.a==='bloquear' && !confirm(`Excluir ${c}? Deixa de funcionar para novos aparelhos.`)) return;
-  if (b.dataset.a==='resetar' && !confirm(`Zerar os aparelhos de ${c}? Ele poderá entrar de novo em até 3 aparelhos novos.`)) return;
+  if (b.dataset.a==='bloquear' && !confirm(`Excluir ${c}? O acesso deixa de funcionar, inclusive nos aparelhos já conectados (na próxima vez que abrirem o app com internet).`)) return;
+  if (b.dataset.a==='resetar' && !confirm(`Zerar os aparelhos de ${c}? Todos os aparelhos serão desconectados na próxima vez que abrirem o app com internet, e a pessoa poderá entrar de novo com o e-mail.`)) return;
   await api({ acao:b.dataset.a, codigo:c }); carregar();
 };
 if (senha) entrar();

@@ -9,6 +9,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   const codigo = normalizar(req.body && req.body.codigo);
   const aparelho = String((req.body && req.body.aparelho) || '').slice(0, 64);
+  const nome = String((req.body && req.body.nome) || 'Aparelho').slice(0, 60);
   if (!codigo) return res.status(401).json({ ok: false, erro: 'Código inválido' });
 
   const fixos = (process.env.ACCESS_CODES || '').split(',').map(normalizar).filter(Boolean);
@@ -23,19 +24,21 @@ module.exports = async (req, res) => {
 
     const max = Math.max(1, parseInt(process.env.MAX_APARELHOS, 10) || 3);
     const agora = new Date().toISOString();
-    if (await redis('HSETNX', 'usos', codigo, JSON.stringify({ aparelhos: [aparelho], em: agora })))
+    const registro = { nome, em: agora, visto: agora };
+    if (await redis('HSETNX', 'usos', codigo, JSON.stringify({ aparelhos: [aparelho], em: agora, info: { [aparelho]: registro } })))
       return res.status(200).json({ ok: true });
 
     // Já usado: libera se for um aparelho conhecido ou se ainda couber mais um.
     const atual = JSON.parse((await redis('HGET', 'usos', codigo)) || '{}');
     const aparelhos = atual.aparelhos || (atual.aparelho ? [atual.aparelho] : []);
-    if (aparelhos.includes(aparelho)) return res.status(200).json({ ok: true });
-    if (aparelhos.length < max) {
-      aparelhos.push(aparelho);
-      await redis('HSET', 'usos', codigo, JSON.stringify({ aparelhos, em: atual.em || agora }));
+    const info = atual.info || {};
+    if (aparelhos.includes(aparelho) || aparelhos.length < max) {
+      if (!aparelhos.includes(aparelho)) aparelhos.push(aparelho);
+      info[aparelho] = { ...(info[aparelho] || { em: agora }), nome, visto: agora };
+      await redis('HSET', 'usos', codigo, JSON.stringify({ aparelhos, em: atual.em || agora, info }));
       return res.status(200).json({ ok: true });
     }
-    res.status(409).json({ ok: false, erro: `Este acesso já foi usado em ${max} aparelhos. Fale com o suporte para liberar um novo.` });
+    res.status(409).json({ ok: false, erro: `Este acesso já está em ${max} aparelhos. Entre num deles e remova um em Ajustes → Conta → Aparelhos conectados, ou fale com o suporte.` });
   } catch (e) {
     res.status(500).json({ ok: false, erro: 'Erro no servidor. Tente de novo em instantes.' });
   }

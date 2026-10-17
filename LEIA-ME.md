@@ -26,7 +26,8 @@ O cliente entra no app com o **e-mail usado na compra**. Cada e-mail libera **at
 No iPhone, o app instalado na tela de início conta como um aparelho separado do Safari, por isso o limite não é 1.
 
 - A cada venda aprovada, a Cakto avisa o app (webhook `api/cakto.js`) e o e-mail é cadastrado sozinho.
-- Reembolso ou chargeback: o e-mail é removido (não libera novos aparelhos).
+- Reembolso ou chargeback: o e-mail é removido e os aparelhos já conectados são desconectados na próxima vez que abrirem o app com internet.
+- O próprio cliente vê e remove aparelhos em **Ajustes → Conta → Aparelhos conectados**.
 - Painel `SEU-LINK/admin.html`: ver compradores, **Zerar aparelhos** (cliente trocou de celular e estourou o limite),
   excluir, e gerar códigos manuais para vendas fora da Cakto.
 
