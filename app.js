@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 34;
+const APP_VERSAO = 35;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -2901,10 +2901,13 @@ function iniciarApp(){
 if (DEMO){
   const salvo = S;   // mantém só preferências visuais do aparelho
   S = dadosDemo(); S.tema = salvo.tema; S = Object.assign(S, { liberado:true }); migrar();
-  document.body.classList.add('demo');
-  const barra = document.createElement('div'); barra.id = 'demoBar';
-  barra.innerHTML = `<span>👀 <b>Demonstração</b> com dados de exemplo</span><a href="${LINK_COMPRA}" target="_blank" rel="noopener">Quero o meu</a>`;
-  document.body.appendChild(barra);
+  // ?embed=1: demonstração dentro da página de vendas (sem a faixa, a pessoa já está na página de compra)
+  if (!new URLSearchParams(location.search).has('embed')){
+    document.body.classList.add('demo');
+    const barra = document.createElement('div'); barra.id = 'demoBar';
+    barra.innerHTML = `<span>👀 <b>Demonstração</b> com dados de exemplo</span><a href="${LINK_COMPRA}" target="_blank" rel="noopener">Quero o meu</a>`;
+    document.body.appendChild(barra);
+  }
 }
 render();
 if (S.liberado && S.perfil.ok && temSenha()){ aoDestravar = iniciarApp; travar(); } else iniciarApp();
