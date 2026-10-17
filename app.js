@@ -582,6 +582,31 @@ function telaMetas(){
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
 }
 
+// Instruções de instalação: primeiro as do aparelho em uso, depois as dos outros.
+function cardInstalar(){
+  const ua = navigator.userAgent;
+  const ios = /iphone|ipad|ipod/i.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /android/i.test(ua);
+  const atual = ios ? (/CriOS/.test(ua) ? 'ios-chrome' : /FxiOS|EdgiOS|OPiOS/.test(ua) ? 'ios-outro' : 'ios-safari')
+    : android ? (/SamsungBrowser/.test(ua) ? 'samsung' : 'android') : 'pc';
+  const passos = {
+    'ios-safari': ['iPhone (Safari)', ['Toque no botão <b>Compartilhar</b> <span class="kbd">⬆︎</span> na barra de baixo.', 'Role a lista e toque em <b>Adicionar à Tela de Início</b>.', 'Toque em <b>Adicionar</b>, no canto de cima.']],
+    'ios-chrome': ['iPhone (Chrome)', ['Toque no botão <b>Compartilhar</b> <span class="kbd">⬆︎</span> ao lado do endereço, no alto.', 'Toque em <b>Adicionar à Tela de Início</b>.', 'Toque em <b>Adicionar</b>.']],
+    'ios-outro': ['iPhone (outros navegadores)', ['Copie o link do app e abra no <b>Safari</b>.', 'Depois siga as instruções do Safari: <b>Compartilhar</b> → <b>Adicionar à Tela de Início</b>.']],
+    'android': ['Android (Chrome)', ['Toque no botão <b>Instalar app</b> acima, se aparecer.', 'Ou toque no menu <span class="kbd">⋮</span> no canto de cima.', 'Toque em <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.']],
+    'samsung': ['Samsung Internet', ['Toque no menu <span class="kbd">☰</span> na barra de baixo.', 'Toque em <b>Adicionar página a</b> e depois em <b>Tela inicial</b>.']],
+    'pc': ['Computador (Chrome ou Edge)', ['Clique no ícone de <b>instalar</b> <span class="kbd">⊕</span> no fim da barra de endereço.', 'Ou abra o menu do navegador e clique em <b>Instalar Organização Financeira</b>.']]
+  };
+  const lista = (k) => `<ol class="passos">${passos[k][1].map(p=>`<li>${p}</li>`).join('')}</ol>`;
+  const outros = ['ios-safari','ios-chrome','android','samsung','pc'].filter(k=>k!==atual);
+  return `<section class="card"><h3>Instalar no celular</h3>
+    <p class="note" style="margin:0 0 10px">Instalado, o app abre em tela cheia direto da tela inicial e funciona sem internet.</p>
+    ${(atual==='android'||atual==='pc') ? `<button class="btn pri" data-act="instalar">📲 Instalar app</button>` : ''}
+    <div class="inst-atual"><b>${passos[atual][0]}</b>${lista(atual)}</div>
+    <details class="mais"><summary>Instruções para outros aparelhos</summary>
+      ${outros.map(k=>`<div class="inst-outro"><b>${passos[k][0]}</b>${lista(k)}</div>`).join('')}
+    </details></section>`;
+}
 function telaAjustes(){
   const p = S.perfil;
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -597,15 +622,17 @@ function telaAjustes(){
   <section class="card"><h3>Saldo entre meses</h3>
     <div class="switch"><span>Levar o que sobrou para o mês seguinte</span><button class="tg ${S.carry?'on':''}" data-act="carry" aria-label="Alternar"></button></div>
     <p class="note">Ligado: o “restante para gastar” de um mês entra como entrada no próximo.</p></section>
-  ${instalado?'':`<section class="card"><h3>Instalar no celular</h3>
-    ${ios ? '<p class="note">No Safari, toque em <b>Compartilhar</b> e depois em <b>Adicionar à Tela de Início</b>.</p>'
-          : `<button class="btn pri" data-act="instalar">📲 Instalar app</button><p class="note">Se o botão não funcionar, abra o menu do navegador e toque em “Instalar app” ou “Adicionar à tela inicial”.</p>`}</section>`}
+  ${instalado?'':cardInstalar()}
   <section class="card"><h3>Backup dos dados</h3>
     <p class="note" style="margin:0 0 12px">Seus dados ficam só neste aparelho. Faça backup antes de trocar de celular ou limpar o navegador. Guarde o arquivo no Google Drive, iCloud, WhatsApp ou e-mail.</p>
     <p class="note" style="margin:0 0 12px">Último backup: <b>${S.ultimoBackup ? new Date(S.ultimoBackup).toLocaleDateString('pt-BR') + ` (${diasDesde(S.ultimoBackup)===0?'hoje':'há '+diasDesde(S.ultimoBackup)+' dias'})` : 'nunca'}</b>${S.novosDesdeBackup?` · ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} desde então`:''}</p>
     <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
     <button class="btn sec" data-act="importar">⬆️ Restaurar backup</button>
     <input type="file" id="fileImp" accept="application/json,.json" hidden></section>
+  <section class="card"><h3>Exportar para Excel</h3>
+    <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
+    <button class="btn sec" data-act="exportarCsv">📊 Exportar lançamentos</button>
+</section>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
 
@@ -838,6 +865,7 @@ document.addEventListener('click', e=>{
     else toast('Use o menu do navegador → Instalar app');
   }
   else if (a==='exportar'){ fazerBackup(); }
+  else if (a==='exportarCsv'){ exportarCsv(); }
   else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
   else if (a==='zerar'){
@@ -861,26 +889,49 @@ document.addEventListener('click', e=>{
   }
 });
 
-// Gera o arquivo de backup. No celular, abre o menu de compartilhar (salvar em Arquivos, Drive, WhatsApp, e-mail);
+// Entrega um arquivo: no celular, abre o menu de compartilhar (salvar em Arquivos, Drive, WhatsApp, e-mail);
 // onde não houver, baixa o arquivo.
-function fazerBackup(){
-  const nome = 'backup-financas-'+dataHoje()+'.json';
-  const marcar = () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); };
-  const dados = JSON.stringify({ ...S, backupEm: new Date().toISOString() }, null, 2);
+function entregarArquivo(nome, dados, tipo, titulo, aoConcluir){
   let arquivo = null;
-  try { arquivo = new File([dados], nome, { type:'application/json' }); } catch(e){}
-  if (arquivo && navigator.canShare && navigator.canShare({ files:[arquivo] }) && matchMedia('(pointer:coarse)').matches){
-    navigator.share({ files:[arquivo], title:'Backup Organização Financeira' })
-      .then(marcar)
-      .catch(err => { if (err && err.name !== 'AbortError') baixar(); });
-    return;
-  }
-  baixar();
-  function baixar(){
-    const l = document.createElement('a'); l.href = URL.createObjectURL(new Blob([dados],{type:'application/json'}));
+  try { arquivo = new File([dados], nome, { type:tipo }); } catch(e){}
+  const baixar = () => {
+    const l = document.createElement('a'); l.href = URL.createObjectURL(new Blob([dados],{type:tipo}));
     l.download = nome; document.body.appendChild(l); l.click(); l.remove(); setTimeout(()=>URL.revokeObjectURL(l.href),1000);
-    marcar();
-  }
+    aoConcluir();
+  };
+  if (arquivo && navigator.canShare && navigator.canShare({ files:[arquivo] }) && matchMedia('(pointer:coarse)').matches){
+    navigator.share({ files:[arquivo], title:titulo }).then(aoConcluir).catch(err => { if (err && err.name !== 'AbortError') baixar(); });
+  } else baixar();
+}
+function fazerBackup(){
+  const dados = JSON.stringify({ ...S, backupEm: new Date().toISOString() }, null, 2);
+  entregarArquivo('backup-financas-'+dataHoje()+'.json', dados, 'application/json', 'Backup Organização Financeira',
+    () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); });
+}
+// Planilha (CSV no padrão brasileiro: ; entre colunas, vírgula decimal, BOM para o Excel reconhecer acentos).
+// Compras parceladas viram uma linha por parcela, no mês de cada parcela.
+function exportarCsv(){
+  memoParc = null;
+  const linhas = [];
+  const dataBR = (d) => d ? d.split('-').reverse().join('/') : '';
+  const mesBR = (k) => { const o = ymDe(k); return `${MESES[o.m]}/${o.y}`; };
+  const valorBR = (v) => (Math.round((+v||0)*100)/100).toFixed(2).replace('.',',');
+  const add = (k, data, tipo, desc, cat, forma, parc, valor, ess, sit) => { const l = [dataBR(data), mesBR(k), tipo, desc, cat, forma, parc, valorBR(valor), ess, sit]; l.ordem = data || k+'-00'; linhas.push(l); };
+  Object.keys(S.meses).sort().forEach(k=>{
+    const M = S.meses[k];
+    M.entradas.forEach(e=>add(k, e.data, 'Entrada', e.nome, '', '', '', e.valor, '', e.fixa?'Repete todo mês':''));
+    M.gastos.filter(g=>!ehParcelado(g)).forEach(g=>add(k, g.data, 'Gasto', g.desc||nomeCat(g.cat), nomeCat(g.cat), g.forma, '', g.valor, g.essencial?'Sim':'Não', ''));
+    (parcelas()[k]||[]).forEach(x=>{ const o = ymDe(k), d = x.g.data ? key(o.y,o.m)+'-'+String(Math.min(+x.g.data.slice(8,10), diasNoMes(o.y,o.m))).padStart(2,'0') : '';
+      add(k, d, 'Gasto', x.g.desc||nomeCat(x.g.cat), nomeCat(x.g.cat), 'Crédito', `${x.i+1}/${x.n}`, x.valor, x.g.essencial?'Sim':'Não', `Compra de ${valorBR(x.g.valor)} em ${mesBR(x.origem)}`); });
+    M.contas.forEach(c=>add(k, c.data, 'Conta', c.nome, 'Contas fixas', '', '', c.pago?c.valor:(c.planejado||c.valor), '', c.pago?'Paga':`Pendente${c.venc?' (vence dia '+c.venc+')':''}`));
+    M.reservas.forEach(r=>add(k, r.data, 'Reserva', r.nome||r.tipo, r.tipo, '', '', r.valor, '', ''));
+  });
+  if (!linhas.length) return toast('Ainda não há lançamentos para exportar');
+  linhas.sort((a,b)=> a.ordem.localeCompare(b.ordem));
+  const cel = (v) => { v = String(v??''); return /[;"\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+  const cab = ['Data','Mês','Tipo','Descrição','Categoria','Forma de pagamento','Parcela','Valor (R$)','Essencial','Observação'];
+  const csv = '\ufeff' + [cab, ...linhas].map(l=>l.map(cel).join(';')).join('\r\n');
+  entregarArquivo('lancamentos-financas-'+dataHoje()+'.csv', csv, 'text/csv', 'Lançamentos Organização Financeira', () => toast('Planilha exportada ✓'));
 }
 
 document.addEventListener('input', e=>{
