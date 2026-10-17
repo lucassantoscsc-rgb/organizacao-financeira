@@ -99,9 +99,9 @@ function desenhar(){
   document.getElementById('lista').innerHTML = vis.map(x => `
     <div class="item">
       <span class="c">${esc(x.codigo)}</span>
-      ${x.usadoEm ? `<span class="tag u">usado em ${data(x.usadoEm)}</span>` : '<span class="tag l">livre</span>'}
+      ${x.usadoEm ? `<span class="tag u">${x.aparelhos} aparelho${x.aparelhos>1?'s':''} · desde ${data(x.usadoEm)}</span>` : '<span class="tag l">livre</span>'}
       <span class="acts">
-        ${x.usadoEm ? `<button class="sec" data-a="resetar" data-c="${esc(x.codigo)}">Liberar de novo</button>` : ''}
+        ${x.usadoEm ? `<button class="sec" data-a="resetar" data-c="${esc(x.codigo)}">Zerar aparelhos</button>` : ''}
         <button class="del" data-a="bloquear" data-c="${esc(x.codigo)}">Excluir</button>
       </span>
       <span class="n">${esc(x.nota) || 'sem nome'} · criado em ${data(x.criado)}</span>
@@ -116,7 +116,7 @@ document.getElementById('gerar').onclick = async () => {
   const { codigo } = await api({ acao:'gerar', nota });
   document.getElementById('novoCod').textContent = codigo;
   document.getElementById('msgCliente').textContent =
-    `Obrigado pela compra! 🎉\n\nAcesse o app: ${LINK}\nSeu código de acesso: ${codigo}\n\nO código libera 1 aparelho. No celular, abra o link e use "Adicionar à Tela de Início" (iPhone) ou "Instalar app" (Android).`;
+    `Obrigado pela compra! 🎉\n\nAcesse o app: ${LINK}\nSeu código de acesso: ${codigo}\n\nNo iPhone, instale primeiro (Safari → Compartilhar → "Adicionar à Tela de Início"), abra o app pela tela de início e digite o código lá. No Android, abra o link e toque em "Instalar app". O código vale para até 3 aparelhos.`;
   document.getElementById('novo').style.display = 'block';
   document.getElementById('nota').value = '';
   carregar();
@@ -129,7 +129,7 @@ document.getElementById('lista').onclick = async e => {
   const b = e.target.closest('button[data-a]'); if (!b) return;
   const c = b.dataset.c;
   if (b.dataset.a==='bloquear' && !confirm(`Excluir ${c}? Deixa de funcionar para novos aparelhos.`)) return;
-  if (b.dataset.a==='resetar' && !confirm(`Liberar ${c} para entrar em um novo aparelho?`)) return;
+  if (b.dataset.a==='resetar' && !confirm(`Zerar os aparelhos de ${c}? Ele poderá entrar de novo em até 3 aparelhos novos.`)) return;
   await api({ acao:b.dataset.a, codigo:c }); carregar();
 };
 if (senha) entrar();

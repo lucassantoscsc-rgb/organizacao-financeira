@@ -22,11 +22,12 @@ Depois de instalado, abre como app, em tela cheia, e funciona sem internet.
 
 ## Acesso só para quem comprou (automático pela Cakto)
 
-O cliente entra no app com o **e-mail usado na compra**. Cada e-mail libera **um único aparelho**.
+O cliente entra no app com o **e-mail usado na compra**. Cada e-mail libera **até 3 aparelhos** (variável `MAX_APARELHOS` na Vercel muda o limite).
+No iPhone, o app instalado na tela de início conta como um aparelho separado do Safari, por isso o limite não é 1.
 
 - A cada venda aprovada, a Cakto avisa o app (webhook `api/cakto.js`) e o e-mail é cadastrado sozinho.
 - Reembolso ou chargeback: o e-mail é removido (não libera novos aparelhos).
-- Painel `SEU-LINK/admin.html`: ver compradores, **Liberar de novo** (cliente trocou de celular),
+- Painel `SEU-LINK/admin.html`: ver compradores, **Zerar aparelhos** (cliente trocou de celular e estourou o limite),
   excluir, e gerar códigos manuais para vendas fora da Cakto.
 
 **Configuração (uma vez só):**

@@ -600,7 +600,7 @@ function cardInstalar(){
   const lista = (k) => `<ol class="passos">${passos[k][1].map(p=>`<li>${p}</li>`).join('')}</ol>`;
   const outros = ['ios-safari','ios-chrome','android','samsung','pc'].filter(k=>k!==atual);
   return `<section class="card"><h3>Instalar no celular</h3>
-    <p class="note" style="margin:0 0 10px">Instalado, o app abre em tela cheia direto da tela inicial e funciona sem internet.</p>
+    <p class="note" style="margin:0 0 10px">Instalado, o app abre em tela cheia direto da tela inicial e funciona sem internet.${atual.startsWith('ios')?' <b>No iPhone, o app instalado não enxerga os dados daqui do navegador:</b> faça um backup antes, instale e use “Restaurar backup” no app instalado.':''}</p>
     ${(atual==='android'||atual==='pc') ? `<button class="btn pri" data-act="instalar">📲 Instalar app</button>` : ''}
     <div class="inst-atual"><b>${passos[atual][0]}</b>${lista(atual)}</div>
     <details class="mais"><summary>Instruções para outros aparelhos</summary>
@@ -972,10 +972,18 @@ function renderOnboarding(){
   </div></div>`;
 }
 function renderAcesso(){
+  // No iPhone, o app instalado na tela de início não enxerga o que foi feito no Safari (são separados).
+  // Por isso orientamos a instalar antes de liberar.
+  const iosNavegador = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
   $app.innerHTML = `<div class="onb"><div class="in">
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>${esc(CONFIG.nomeApp)}</h1>
-    <p>Digite o e-mail que você usou na compra para liberar o app neste aparelho.</p>
+    ${iosNavegador ? `<div class="dica-ios"><b>📲 Instale antes de entrar</b>
+      <ol><li>Toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> ${/CriOS/.test(navigator.userAgent)?'ao lado do endereço':'na barra de baixo'}.</li>
+      <li>Toque em <b>Adicionar à Tela de Início</b>.</li>
+      <li>Abra o app pelo ícone na tela de início e digite seu e-mail lá.</li></ol>
+      <small>No iPhone, o que você fizer aqui no navegador não aparece no app instalado.</small></div>
+      <p style="margin-top:18px">Prefere usar pelo navegador mesmo? Digite o e-mail da compra:</p>` : `<p>Digite o e-mail que você usou na compra para liberar o app neste aparelho.</p>`}
     <div class="f"><label>E-mail da compra (ou código de acesso)</label><input id="aCod" type="email" inputmode="email" autocapitalize="none" autocomplete="email" placeholder="seuemail@exemplo.com"></div>
     <button class="btn pri" data-act="liberar">Liberar acesso</button>
   </div></div>`;

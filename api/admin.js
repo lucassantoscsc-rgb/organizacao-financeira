@@ -39,7 +39,8 @@ module.exports = async (req, res) => {
       for (let i = 0; i < cods.length; i += 2) {
         const info = JSON.parse(cods[i + 1]);
         const u = mapaUsos[cods[i]];
-        lista.push({ codigo: cods[i], nota: info.nota, criado: info.criado, usadoEm: u ? u.em : null });
+        lista.push({ codigo: cods[i], nota: info.nota, criado: info.criado, usadoEm: u ? u.em : null,
+          aparelhos: u ? (u.aparelhos || [u.aparelho]).length : 0 });
       }
       lista.sort((a, b) => b.criado.localeCompare(a.criado));
       return res.json({ ok: true, lista });
