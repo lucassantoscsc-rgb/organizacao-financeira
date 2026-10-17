@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 30;
+const APP_VERSAO = 31;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -48,7 +48,7 @@ const LINK_COMPRA = 'https://planilhadeorganizacaofinanceira.online';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
-  if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; if (!S.cartoes) S.cartoes = []; S.v = 2;
+  if (!S.orcamentos) S.orcamentos = {}; if (!S.meses) S.meses = {}; if (!S.cartoes) S.cartoes = []; if (!S.dividas) S.dividas = []; S.v = 2;
   // Cofrinhos: a meta e a reserva de emergência antigas viram os dois primeiros.
   if (!S.cofrinhos){
     S.cofrinhos = [];
@@ -181,6 +181,139 @@ function limiteUsado(id){
   Object.entries(faturas()).forEach(([k,xs]) => { if (k >= kh) t += soma(xs.filter(x=>x.cartao===id), x=>x.valor); });
   return t;
 }
+/* ---------- controle de dívidas ----------
+   Saldo devedor, juros ao mês e parcela. Calcula prazo, juros futuros e o plano de quitação
+   (avalanche: maior juros primeiro; bola de neve: menor saldo primeiro). */
+const TIPOS_DIVIDA = [['emprestimo','🏦','Empréstimo'],['financiamento','🏠','Financiamento'],['rotativo','💳','Cartão (rotativo)'],['cheque','🧾','Cheque especial'],['pessoa','🤝','Com alguém'],['outro','📌','Outra']];
+const emojiDivida = (d) => (TIPOS_DIVIDA.find(t=>t[0]===d.tipo)||TIPOS_DIVIDA[5])[1];
+const dividasAtivas = () => (S.dividas||[]).filter(d => d.saldo > 0.009);
+// Meses para quitar uma dívida pagando só a parcela. Infinity = a parcela não cobre os juros.
+function prazoDivida(d){
+  const i = (d.juros||0)/100, S0 = d.saldo, P = d.parcela;
+  if (S0 <= 0.009) return 0;
+  if (!P) return Infinity;
+  if (!i) return Math.ceil(S0 / P);
+  if (P <= S0 * i) return Infinity;
+  return Math.ceil(-Math.log(1 - i*S0/P) / Math.log(1+i));
+}
+function jurosFuturos(d){ const n = prazoDivida(d); return isFinite(n) ? Math.max(0, n*d.parcela - d.saldo) : Infinity; }
+const mesTxtCurto = (n) => { const q = somaMeses(hoje.getFullYear(), hoje.getMonth(), n); return MES_CURTO[q.m] + '/' + q.y; };
+// Simula o pagamento de todas as dívidas, mês a mês, com um valor extra e "efeito bola de neve"
+// (quando uma dívida termina, a parcela dela passa a reforçar a próxima).
+function simularQuitacao(extra, metodo){
+  const ds = dividasAtivas().map(d => ({ id:d.id, nome:d.nome, s:d.saldo, i:(d.juros||0)/100, p:d.parcela||0 }));
+  let mes = 0, juros = 0;
+  while (ds.some(d=>d.s>0.009) && mes < 600){
+    mes++;
+    ds.forEach(d => { if (d.s > 0.009){ const j = d.s*d.i; juros += j; d.s += j; } });
+    let sobra = extra;
+    ds.forEach(d => { if (d.s > 0.009){ const pg = Math.min(d.p, d.s); d.s -= pg; sobra += d.p - pg; } else sobra += d.p; });
+    const ordem = ds.filter(d=>d.s>0.009).sort(metodo==='avalanche' ? (a,b)=>(b.i-a.i)||(a.s-b.s) : (a,b)=>a.s-b.s);
+    for (const d of ordem){ if (sobra <= 0) break; const pg = Math.min(sobra, d.s); d.s -= pg; sobra -= pg; }
+    ds.forEach(d => { if (d.s <= 0.009 && !d.fim) d.fim = mes; });
+  }
+  return { meses: mes, juros, impossivel: mes >= 600, ordem: [...ds].sort((a,b)=>(a.fim||999)-(b.fim||999)) };
+}
+function cardDividas(){
+  const ds = dividasAtivas(), quitadas = (S.dividas||[]).filter(d=>d.saldo<=0.009);
+  let h = `<section class="card" id="cardDividas"><h3>💸 Dívidas</h3>`;
+  if (!ds.length) return h + `${quitadas.length?`<p class="note" style="margin:0 0 10px">🎉 ${quitadas.length} dívida${quitadas.length>1?'s':''} quitada${quitadas.length>1?'s':''}. Você está livre!</p>`:'<p class="note" style="margin:0 0 12px">Cadastre empréstimos, financiamentos ou o rotativo do cartão para ver quando cada um termina e o melhor jeito de quitar.</p>'}<button class="btn sec" data-act="novaDivida">+ Adicionar dívida</button></section>`;
+  const total = soma(ds, d=>d.saldo), parcelas = soma(ds, d=>d.parcela||0), base = simularQuitacao(0, 'avalanche');
+  h += `<div class="assin-tot"><div><b class="num">${brl(total)}</b><span>devendo no total</span></div><div><b class="num">${brl(parcelas)}</b><span>de parcelas por mês</span></div></div>
+    <p class="note" style="margin:0 0 10px">${base.impossivel ? '⚠️ Com as parcelas atuais, alguma dívida nunca termina (a parcela não cobre os juros).' : `Mantendo ${brl(parcelas)} por mês para as dívidas (quando uma termina, o valor dela reforça a próxima), você fica livre em <b>${mesTxtCurto(base.meses)}</b>.`}</p>`;
+  ds.forEach(d => {
+    const n = prazoDivida(d), pago = d.inicial ? Math.max(0, Math.min(100, (1 - d.saldo/d.inicial)*100)) : 0;
+    h += `<button class="cartao" data-divida="${d.id}"><span class="row"><b>${emojiDivida(d)} ${esc(d.nome)}</b><b class="num">${brl(d.saldo)}</b></span>
+      <span class="row"><span class="muted">${d.juros?`${String(d.juros).replace('.',',')}% ao mês`:'sem juros'} · ${brl(d.parcela||0)}/mês</span><span class="muted">${isFinite(n)?`termina ${mesTxtCurto(n)}`:'<b style="color:var(--bad)">não diminui</b>'}</span></span>
+      ${d.inicial?`<span class="bar"><span style="width:${pago}%"></span></span><span class="foot"><span>${pago.toFixed(0)}% pago</span><span>${isFinite(n)?`juros a pagar ~${brl0(jurosFuturos(d))}`:''}</span></span>`:''}</button>`;
+  });
+  return h + `<div class="row2"><button class="btn pri" data-act="planoQuitacao">Plano de quitação</button><button class="btn sec" data-act="novaDivida">+ Adicionar</button></div></section>`;
+}
+function editarDivida(id){
+  const d = id ? (S.dividas||[]).find(x=>x.id===id) : { nome:'', tipo:'emprestimo', saldo:0, juros:'', parcela:0, venc:'' };
+  form = { tipo:'divida', id, v:{ tipo:d.tipo, jurosAno:false } };
+  abrir(`<h2>${id?'Editar':'Nova'} dívida</h2>
+    <div class="f"><label>Tipo</label><div class="chips" data-chips="tipoDiv">${TIPOS_DIVIDA.map(([v,e,l])=>`<button type="button" class="${v===d.tipo?'on':''}" data-v="${v}">${e} ${l}</button>`).join('')}</div></div>
+    <div class="f"><label>Nome</label><input id="dNome" placeholder="Ex.: Empréstimo Caixa, Financiamento do carro" value="${esc(d.nome)}"></div>
+    <div class="f"><label>Quanto você deve hoje (saldo devedor)</label><input class="num money" id="dSaldo" inputmode="decimal" placeholder="0,00" value="${d.saldo?moneyVal(d.saldo):''}"></div>
+    <div class="row2"><div class="f"><label>Valor da parcela</label><input class="num" id="dParc" inputmode="decimal" placeholder="0,00" value="${d.parcela?moneyVal(d.parcela):''}"></div>
+    <div class="f"><label>Vence dia (opcional)</label><input class="num" id="dVenc" inputmode="numeric" placeholder="Ex.: 15" value="${d.venc||''}"></div></div>
+    <div class="f"><label>Juros (opcional)</label><div class="inline"><input class="num" id="dJuros" inputmode="text" placeholder="Ex.: 2,5" value="${d.juros?String(d.juros).replace('.',','):''}"><div class="chips" data-chips="jurosAno"><button type="button" class="on" data-v="mes">% ao mês</button><button type="button" data-v="ano">% ao ano</button></div></div></div>
+    <p class="note" style="margin:-4px 0 12px">O saldo devedor e os juros aparecem no app do banco ou no contrato. Atualize o saldo de vez em quando para a previsão ficar certa.</p>
+    <button class="btn pri" data-act="salvarDivida">Salvar</button>${id?'<button class="btn dan" data-act="excluirDivida">Excluir dívida</button>':''}`);
+}
+function salvarDivida(){
+  const nome = document.getElementById('dNome').value.trim(), saldo = parseValor(document.getElementById('dSaldo').value);
+  if (!nome) return toast('Dê um nome para a dívida');
+  if (!saldo) return toast('Informe quanto você deve hoje');
+  let juros = parseFloat(String(document.getElementById('dJuros').value).replace(',','.')) || 0;
+  if (form.v.jurosAno && juros) juros = Math.round((Math.pow(1 + juros/100, 1/12) - 1) * 10000) / 100;
+  const dados = { nome, tipo:form.v.tipo, saldo, juros, parcela:parseValor(document.getElementById('dParc').value), venc: Math.min(31, parseInt(document.getElementById('dVenc').value)||0) || '' };
+  if (form.id){ const d = S.dividas.find(x=>x.id===form.id); Object.assign(d, dados); if (!d.inicial || saldo > d.inicial) d.inicial = saldo; }
+  else S.dividas.push({ id:uid(), ...dados, inicial:saldo, criada:dataHoje(), pagamentos:[] });
+  salvar(); fechar(); render(); toast('Dívida salva ✓');
+}
+function abrirDivida(id){
+  const d = S.dividas.find(x=>x.id===id); if (!d) return;
+  const n = prazoDivida(d), i = (d.juros||0)/100;
+  abrir(`<h2>${emojiDivida(d)} ${esc(d.nome)}</h2>
+    <div class="kpis"><div><span>Saldo devedor</span><b class="num">${brl(d.saldo)}</b></div><div><span>Parcela</span><b class="num">${brl(d.parcela||0)}</b></div><div><span>Juros</span><b>${d.juros?String(d.juros).replace('.',',')+'% a.m.':'—'}</b></div></div>
+    ${d.saldo<=0.009 ? '<p class="gprev ok">🎉 Dívida quitada!</p>' : !isFinite(n) ? `<div class="alert crit"><span>⚠️</span><div><b>Esta dívida não diminui.</b> Os juros do mês (${brl(d.saldo*i)}) são maiores que a parcela. Priorize pagar mais nela ou renegociar.</div></div>`
+      : `<p class="sim-txt">Pagando ${brl(d.parcela)} por mês, termina em <b>${mesTxtCurto(n)}</b> (${n} ${n===1?'mês':'meses'}).${d.juros?` Você ainda vai pagar cerca de <b>${brl0(jurosFuturos(d))}</b> de juros.`:''}</p>`}
+    ${d.saldo>0.009?`<button class="btn pri" data-act="pagarDivida" data-divida-id="${d.id}">Registrar pagamento</button>`:''}
+    ${(d.pagamentos||[]).length?`<h4 class="sub-h">Pagamentos</h4><div class="list flat">${[...d.pagamentos].reverse().slice(0,24).map(p=>`<div class="item"><div class="tx"><div class="t1">${p.extra?'Pagamento extra':'Parcela'}</div><div class="t2">${fmtData(p.data)}/${p.data.slice(2,4)}</div></div><div class="val num">${brl(p.valor)}</div></div>`).join('')}</div>`:''}
+    <button class="btn sec" data-act="editarDivida" data-divida-id="${d.id}" style="margin-top:12px">Editar dívida</button>`);
+}
+function pagarDivida(id){
+  const d = S.dividas.find(x=>x.id===id);
+  form = { tipo:'pagamentoDivida', id, v:{ extra:false, lancar:true } };
+  abrir(`<h2>Pagamento · ${esc(d.nome)}</h2>
+    <div class="f"><label>Valor pago</label><input class="money num" id="pValor" inputmode="decimal" value="${moneyVal(Math.min(d.parcela||d.saldo, d.saldo*(1+(d.juros||0)/100)))}"></div>
+    <div class="f"><label>Data</label><input type="date" id="pData" value="${dataHoje()}"></div>
+    <div class="switch f"><span>Pagamento extra <small class="muted">(adiantamento/amortização, sem juros do mês)</small></span><button type="button" class="tg" data-act="tgExtra"></button></div>
+    <div class="switch f"><span>Lançar também como gasto do mês</span><button type="button" class="tg on" data-act="tgLancar"></button></div>
+    <button class="btn pri" data-act="confirmarPagamento">Registrar</button>`);
+}
+function confirmarPagamento(){
+  const d = S.dividas.find(x=>x.id===form.id), valor = parseValor(document.getElementById('pValor').value), data = document.getElementById('pData').value || dataHoje();
+  if (!valor) return toast('Informe o valor');
+  // parcela normal: incide o juros do mês e depois abate; pagamento extra: abate direto
+  const novo = form.v.extra ? d.saldo - valor : d.saldo * (1 + (d.juros||0)/100) - valor;
+  d.saldo = Math.max(0, Math.round(novo*100)/100);
+  (d.pagamentos = d.pagamentos || []).push({ data, valor, extra:form.v.extra });
+  if (form.v.lancar){ const o = ymDe(data.slice(0,7)), M = mes(o.y,o.m,true);
+    M.gastos.push({ id:uid(), cat:'🧾 Parcela', desc:(form.v.extra?'Pagamento extra · ':'Parcela · ') + d.nome, valor, forma:'Pix / Dinheiro', data, essencial:true, parcelas:1 });
+    S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo(); }
+  salvar(); fechar(); render();
+  if (d.saldo <= 0.009){ d.quitadaEm = data; salvar(); toast(`🎉 Dívida quitada: ${d.nome}! Parabéns!`); } else toast('Pagamento registrado ✓');
+  checarConquistas();
+}
+function abrirPlanoQuitacao(){
+  form = { tipo:'plano', v:{ metodo:'avalanche' } };
+  abrir(`<h2>📋 Plano de quitação</h2>
+    <div class="f"><label>Qual estratégia?</label><div class="chips" data-chips="metodo"><button type="button" class="on" data-v="avalanche">🏔️ Avalanche</button><button type="button" data-v="bola">⛄ Bola de neve</button></div>
+      <p class="note" id="pMetodoTxt"></p></div>
+    <div class="f"><label>Quanto você consegue pagar a mais por mês? (opcional)</label><input class="num money" id="pExtra" inputmode="decimal" placeholder="0,00"></div>
+    <div id="pResultado"></div>`);
+  desenharPlano();
+}
+function desenharPlano(){
+  const box = document.getElementById('pResultado'); if (!box) return;
+  document.getElementById('pMetodoTxt').innerHTML = form.v.metodo==='avalanche' ? 'Paga primeiro a dívida com <b>maior juros</b>. É a que mais economiza dinheiro.' : 'Paga primeiro a <b>menor dívida</b>. Você quita uma rápido, e isso motiva a continuar.';
+  const extra = parseValor(document.getElementById('pExtra').value), base = simularQuitacao(0, form.v.metodo), plano = simularQuitacao(extra, form.v.metodo);
+  let h = '';
+  if (plano.impossivel) h += `<div class="alert crit"><span>⚠️</span><div>Com esses valores, as dívidas não terminam: os juros crescem mais rápido que os pagamentos. Aumente o valor extra ou renegocie as dívidas com juros mais altos.</div></div>`;
+  else {
+    if (extra > 0 && !base.impossivel){
+      const ganhoMeses = base.meses - plano.meses, ganhoJuros = base.juros - plano.juros;
+      h += `<div class="sim-veredito sim"><span>🚀</span><b>Livre ${ganhoMeses} ${ganhoMeses===1?'mês':'meses'} antes${ganhoJuros>1?` e ${brl0(ganhoJuros)} a menos de juros`:''}</b></div>`;
+    }
+    h += `<p class="sim-txt">${extra>0?`Pagando ${brl(extra)} a mais por mês`:'Pagando só as parcelas'} e usando o valor das dívidas que terminam para reforçar as próximas, você fica <b>livre das dívidas em ${mesTxtCurto(plano.meses)}</b>. Juros no caminho: ~${brl0(plano.juros)}.</p>
+      <h4 class="sub-h">Ordem para quitar</h4><div class="sim-meses">${plano.ordem.map((d,i)=>`<div><span>${i+1}. ${esc(d.nome)}</span><span>${d.fim?`quitada em <b>${mesTxtCurto(d.fim)}</b>`:'—'}</span></div>`).join('')}</div>`;
+  }
+  box.innerHTML = h;
+}
+
 function cardCartoes(){
   const cs = S.cartoes || [];
   let h = `<section class="card" id="cardCartoes"><h3>💳 Cartões de crédito</h3>`;
@@ -470,6 +603,7 @@ const CONQUISTAS = [
   { id:'contas', e:'✅', t:'Contas em dia', d:'Pagou todas as contas de um mês', ok:x=>x.contasDia },
   { id:'cem', e:'💯', t:'Anotador profissional', d:'Fez 100 lançamentos', ok:x=>x.total>=100 },
   { id:'backup', e:'💾', t:'Dados protegidos', d:'Fez um backup', ok:()=>!!S.ultimoBackup },
+  { id:'divida', e:'🎊', t:'Dívida quitada!', d:'Quitou uma dívida', ok:()=>(S.dividas||[]).some(d=>d.saldo<=0.009 && d.pagamentos && d.pagamentos.length) },
   { id:'retro', e:'🎬', t:'Olhando para trás', d:'Viu uma retrospectiva do mês', ok:()=>Object.keys(S.retroVistas||{}).length>0 },
 ];
 function contextoConquistas(){
@@ -1145,7 +1279,12 @@ function calcularDicas(){
   const res = cofReserva(), ideal = reservaIdeal(6);
   if (ideal && !res) dicas.push({ e:'🛟', p: 40, acao:'criarReserva', t:`Você ainda não tem reserva de emergência. O ideal para você é cerca de <b>${brl0(ideal)}</b>.` });
   else if (ideal && res && res.alvo < ideal * 0.6) dicas.push({ e:'🛟', p: 32, acao:'abrirReserva', t:`A meta da sua reserva (${brl0(res.alvo||0)}) está abaixo do ideal para os seus gastos: cerca de <b>${brl0(ideal)}</b>.` });
-  // 11. não essenciais
+  // 11. dívidas: juros altos ou parcela que não cobre os juros
+  const ruim = dividasAtivas().filter(dv => !isFinite(prazoDivida(dv)));
+  if (ruim.length) dicas.push({ e:'🚨', p: 90, t:`A dívida <b>${esc(ruim[0].nome)}</b> não está diminuindo: a parcela não cobre os juros do mês. Priorize pagar mais nela ou renegociar.` });
+  else { const cara = dividasAtivas().filter(dv=>(dv.juros||0) >= 5).sort((a,b)=>b.juros-a.juros)[0];
+    if (cara) dicas.push({ e:'🔥', p: 65, t:`Priorize quitar <b>${esc(cara.nome)}</b>: ${String(cara.juros).replace('.',',')}% de juros ao mês é muito caro. Qualquer valor extra rende mais ali do que guardado.` }); }
+  // 12. não essenciais
   const naoEss = C.consumo - C.essenciais;
   if (C.consumo > 500 && naoEss / C.consumo > 0.45) dicas.push({ e:'🎯', p: 35, t:`${Math.round(naoEss/C.consumo*100)}% dos seus gastos deste mês são <b>não essenciais</b>.` });
   // no máximo 2 dicas do tipo "acima do normal" (as maiores), para não repetir
@@ -1738,6 +1877,7 @@ function telaMetas(){
   return `<button class="retro-card simular" data-act="possoComprar"><span class="rc-e">🤔</span><span><b>Posso comprar?</b><small>Simule uma compra antes de gastar</small></span><span class="rc-seta">›</span></button>
   ${cardCofrinhos(false)}
   ${cardCartoes()}
+  ${cardDividas()}
   ${cardOrcamentos(C)}
   ${cardConquistas()}
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
@@ -1970,7 +2110,7 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao],[data-divida]');
   if (!t) return;
   if (DEMO && BLOQ_DEMO.has(t.dataset.act)) return toast('Na demonstração isso fica desligado. Compre para usar com seus dados 😉');
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
@@ -1978,6 +2118,9 @@ document.addEventListener('click', e=>{
     t.parentElement.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b===t));
     form.v[name] = name==='essencial' ? t.dataset.v==='Sim' : name==='cartao' ? ((S.cartoes||[]).find(c=>c.nome===t.dataset.v)||{}).id : t.dataset.v;
     if (name==='cartao') infoParcelas();
+    if (name==='tipoDiv'){ form.v.tipo = t.dataset.v; return; }
+    if (name==='jurosAno'){ form.v.jurosAno = t.dataset.v==='ano'; return; }
+    if (name==='metodo'){ form.v.metodo = t.dataset.v; desenharPlano(); return; }
     if (name==='pag'){ form.v.credito = t.dataset.v==='credito'; document.getElementById('sBoxParc').hidden = !form.v.credito; atualizarSimulacao(); return; }
     if (name==='forma'){ const bp = document.getElementById('boxParc'); if (bp) bp.hidden = form.v.forma!=='Crédito';
       const bc = document.getElementById('boxCartao'); if (bc) bc.hidden = form.v.forma!=='Crédito' || !(S.cartoes||[]).length; infoParcelas(); if (form.v.forma==='Crédito') toast('Crédito: entra na fatura do mês seguinte'); }
@@ -1998,6 +2141,7 @@ document.addEventListener('click', e=>{
   if (t.dataset.tab){ fechar(); aba=t.dataset.tab; render(); scrollTo(0,0); return; }
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
   if (t.dataset.cartao && !t.closest('[data-chips]')){ editarCartao(t.dataset.cartao); return; }
+  if (t.dataset.divida){ abrirDivida(t.dataset.divida); return; }
   if (t.dataset.impmodo){ imp.modo = t.dataset.impmodo; prepararImportacao(); const top = $sh.scrollTop; desenharImportacao(); $sh.scrollTop = top; return; }
   if (t.dataset.dia){ calSel = { k:key(cur.y,cur.m), d:+t.dataset.dia }; render(); return; }
   if (t.dataset.edit){ abrirForm(t.dataset.edit, t.dataset.id, t.dataset.mk); return; }
@@ -2099,6 +2243,15 @@ document.addEventListener('click', e=>{
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='novaDivida'){ editarDivida(); }
+  else if (a==='editarDivida'){ editarDivida(t.dataset.dividaId); }
+  else if (a==='salvarDivida'){ salvarDivida(); }
+  else if (a==='excluirDivida'){ if (confirm('Excluir esta dívida? Os pagamentos lançados como gasto continuam.')){ S.dividas = S.dividas.filter(x=>x.id!==form.id); salvar(); fechar(); render(); toast('Dívida excluída'); } }
+  else if (a==='pagarDivida'){ pagarDivida(t.dataset.dividaId); }
+  else if (a==='tgExtra'){ form.v.extra = !form.v.extra; t.classList.toggle('on', form.v.extra); }
+  else if (a==='tgLancar'){ form.v.lancar = !form.v.lancar; t.classList.toggle('on', form.v.lancar); }
+  else if (a==='confirmarPagamento'){ confirmarPagamento(); }
+  else if (a==='planoQuitacao'){ abrirPlanoQuitacao(); }
   else if (a==='usarIdeal'){ const c = cofPorId(t.dataset.cofId); c.alvo = reservaIdeal(+t.dataset.meses); salvar(); render(); abrirCofrinho(c.id); toast('Meta da reserva atualizada ✓'); }
   else if (a==='criarReserva'){ if (!cofPorId('reserva')) S.cofrinhos.unshift({ id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:reservaIdeal(6), prazo:'' }); salvar(); render(); abrirCofrinho(cofReserva().id); toast('Reserva criada ✓'); checarConquistas(); }
   else if (a==='abrirReserva'){ abrirCofrinho(cofReserva().id); }
@@ -2270,6 +2423,7 @@ document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.targe
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
   if (e.target.id==='sValor') atualizarSimulacao();
+  if (e.target.id==='pExtra') desenharPlano();
   if (e.target.id==='fBusca'){
     busca = e.target.value;
     memo = {}; memoParc = null; memoFat = null;
@@ -2295,7 +2449,7 @@ document.addEventListener('change', e=>{
     } catch(_){ toast('Arquivo de backup inválido'); } };
   r.readAsText(e.target.files[0]);
 });
-document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && form.tipo!=='cofrinho' && form.tipo!=='simulacao' && form.tipo!=='cartao' && e.target.tagName==='INPUT') salvarForm(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') fechar(); if(e.key==='Enter' && e.target.id==='fFrase'){ e.preventDefault(); clearTimeout(esperaFrase); e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); e.target.blur(); return; } if(e.key==='Enter' && form && !['cofrinho','simulacao','cartao','divida','pagamentoDivida','plano'].includes(form.tipo) && e.target.tagName==='INPUT') salvarForm(); });
 
 /* ---------- atualizações ----------
    versao.json diz qual é a versão publicada. Se for mais nova que este código:
@@ -2454,7 +2608,8 @@ function dadosDemo(){
       { id:'viagem', nome:'Viagem para a praia', emoji:'🏖️', alvo:4000, prazo:key(somaMeses(hoje.getFullYear(),hoje.getMonth(),5).y, somaMeses(hoje.getFullYear(),hoje.getMonth(),5).m) },
       { id:'note', nome:'Notebook novo', emoji:'💻', alvo:5000, prazo:'' } ],
     orcamentos:{ '🧺 Mercado':900, '🍗 Alimentação':600, '🎉 Lazer':300 },
-    cartoes:[{ id:'nubank', nome:'Nubank', fechamento:3, vencimento:10, limite:6000 }] });
+    cartoes:[{ id:'nubank', nome:'Nubank', fechamento:3, vencimento:10, limite:6000 }],
+    dividas:[{ id:'emp', nome:'Empréstimo pessoal', tipo:'emprestimo', saldo:4800, juros:3.5, parcela:450, venc:15, inicial:8000, criada:'', pagamentos:[] }] });
   const hojeDia = hoje.getDate();
   for (let off = -4; off <= 0; off++){
     const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), off), k = key(o.y, o.m), M = mes(o.y, o.m, true);

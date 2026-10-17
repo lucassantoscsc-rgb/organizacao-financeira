@@ -1,6 +1,7 @@
 {
-  "versao": 30,
+  "versao": 31,
   "novidades": [
-    "🛟 Reserva de emergência ideal: o app calcula quanto você deveria ter guardado (com base nos seus gastos essenciais) e mostra quantos meses sua reserva já cobre."
+    "💸 Controle de dívidas: cadastre empréstimos, financiamentos e o rotativo do cartão, veja quando cada um termina e quanto vai pagar de juros.",
+    "📋 Plano de quitação: descubra a melhor ordem para pagar e quanto tempo e juros você economiza pagando um pouco a mais por mês."
   ]
 }
