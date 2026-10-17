@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 32;
+const APP_VERSAO = 33;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -313,6 +313,45 @@ function desenharPlano(){
   }
   box.innerHTML = h;
 }
+
+/* ---------- etiquetas ----------
+   Gastos com tags: [] (ex.: "Viagem Praia 2026"). Etiqueta ativa = aplicada a todo gasto novo. */
+const normTag = (t) => String(t||'').replace(/^#/,'').trim().replace(/\s+/g,' ').slice(0,30);
+const tagsDe = (txt) => [...new Set(String(txt||'').split(',').map(normTag).filter(Boolean))];
+function todasEtiquetas(){
+  const m = {};
+  Object.entries(S.meses).forEach(([k,M]) => M.gastos.forEach(g => (g.tags||[]).forEach(t => {
+    const v = (+g.valor) * (g.minha!=null && g.valor ? g.minha/g.valor : 1);
+    const x = m[t] = m[t] || { nome:t, total:0, n:0, de:null, ate:null, itens:[] };
+    x.total += v; x.n++; const d = g.data || k+'-01'; if (!x.de || d < x.de) x.de = d; if (!x.ate || d > x.ate) x.ate = d; x.itens.push({ g, k, v });
+  })));
+  return Object.values(m).sort((a,b) => (b.ate||'').localeCompare(a.ate||''));
+}
+function cardEtiquetas(){
+  const ts = todasEtiquetas();
+  let h = `<section class="card" id="cardEtiquetas"><h3>🏷️ Etiquetas</h3>`;
+  if (!ts.length) return h + `<p class="note" style="margin:0">Marque gastos de um mesmo evento com uma etiqueta (ex.: “Viagem Praia”, “Reforma”) e veja quanto custou no total. Ao lançar um gasto, abra “Descrição, data e essencial”, ou escreva <b>#viagem</b> no lançamento por frase.</p></section>`;
+  ts.forEach(x => { h += `<button class="cartao" data-etiqueta="${esc(x.nome)}"><span class="row"><b>🏷️ ${esc(x.nome)}${S.tagAtiva===x.nome?' <span class="tag auto">ativa</span>':''}</b><b class="num">${brl(x.total)}</b></span>
+    <span class="row"><span class="muted">${x.n} gasto${x.n>1?'s':''} · ${fmtData(x.de)}${x.de!==x.ate?' a '+fmtData(x.ate):''}</span></span></button>`; });
+  return h + `</section>`;
+}
+function abrirEtiqueta(nome){
+  const x = todasEtiquetas().find(t=>t.nome===nome); if (!x) return;
+  const cats = {}; x.itens.forEach(i => cats[i.g.cat] = (cats[i.g.cat]||0) + i.v);
+  const cs = Object.entries(cats).sort((a,b)=>b[1]-a[1]), max = cs[0][1];
+  abrir(`<h2>🏷️ ${esc(nome)}</h2>
+    <div class="kpis"><div><span>Total</span><b class="num">${brl(x.total)}</b></div><div><span>Gastos</span><b>${x.n}</b></div><div><span>Período</span><b>${fmtData(x.de)}${x.de!==x.ate?' – '+fmtData(x.ate):''}</b></div></div>
+    <div class="hbars" style="margin:6px 0 12px">${cs.map(([c,v])=>`<div class="hb" style="cursor:default"><span class="hb-l"><span class="hb-e">${emojiCat(c)}</span>${esc(nomeCat(c))}</span><span class="hb-v num">${brl(v)} <small>${(v/x.total*100).toFixed(0)}%</small></span><span class="hb-t"><span style="width:${Math.max(v/max*100,2)}%"></span></span></div>`).join('')}</div>
+    <button class="btn ${S.tagAtiva===nome?'sec':'pri'}" data-act="tagAtiva" data-tag="${esc(nome)}">${S.tagAtiva===nome?'⏹ Parar de marcar gastos novos':'▶️ Marcar todos os gastos novos com esta etiqueta'}</button>
+    <h4 class="sub-h">Lançamentos</h4>
+    <div class="list flat">${x.itens.sort((a,b)=>(b.g.data||b.k).localeCompare(a.g.data||a.k)).map(i=>`<button class="item" data-edit="gastos" data-id="${i.g.id}" data-mk="${i.k}"><div class="ic">${emojiCat(i.g.cat)}</div><div class="tx"><div class="t1">${esc(i.g.desc||nomeCat(i.g.cat))}</div><div class="t2">${i.g.data?fmtData(i.g.data)+'/'+i.g.data.slice(2,4):''}</div></div><div class="val num">${brl(i.v)}</div></button>`).join('')}</div>
+    <div class="row2" style="margin-top:12px"><button class="btn sec" data-act="renomearTag" data-tag="${esc(nome)}">Renomear</button><button class="btn dan" data-act="removerTag" data-tag="${esc(nome)}">Remover etiqueta</button></div>`);
+}
+function cardTagAtiva(){
+  if (!S.tagAtiva || key(cur.y,cur.m) !== chaveHoje()) return '';
+  return `<div class="alert info"><span>🏷️</span><div>Os gastos novos estão sendo marcados com <b>${esc(S.tagAtiva)}</b>. <button class="d-acao" style="display:inline;margin:0 0 0 4px" data-act="tagAtiva" data-tag="${esc(S.tagAtiva)}">Parar</button></div></div>`;
+}
+function tagsUsadas(){ return todasEtiquetas().slice(0,6).map(t=>t.nome); }
 
 /* ---------- me devem / dividir contas ----------
    aReceber: { id, pessoa, desc, valor, data, recebido, recebidoEm, gastoId, mk } */
@@ -823,11 +862,11 @@ function compartilharRetro(){
   const g = cv.getContext('2d'), F = '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
   const bg = g.createLinearGradient(0,0,1080,1920); bg.addColorStop(0,'#0b3b3a'); bg.addColorStop(1,'#0f766e'); g.fillStyle = bg; g.fillRect(0,0,1080,1920);
   g.textAlign = 'center'; g.fillStyle = 'rgba(255,255,255,.75)'; g.font = `600 44px ${F}`; g.fillText('MINHA RETROSPECTIVA', 540, 210);
-  g.fillStyle = '#fff'; g.font = `800 96px ${F}`; g.fillText(`${MESES[d.m]} ${d.y}`, 540, 320);
+  g.fillStyle = '#fff'; g.font = `800 96px ${F}`; g.fillText(d.rotulo || `${MESES[d.m]} ${d.y}`, 540, 320);
   g.font = `260px ${F}`; g.fillText(d.titulo[0], 540, 690);
   g.font = `800 92px ${F}`; quebra(g, d.titulo[1], 540, 860, 940, 104);
   g.fillStyle = 'rgba(255,255,255,.85)'; g.font = `500 44px ${F}`; quebra(g, d.titulo[2], 540, 1000, 900, 58);
-  const linhas = [`${emojiCat(d.cats[0][0])}  Categoria campeã: ${nomeCat(d.cats[0][0])}`,
+  const linhas = d.linhasShare || [`${emojiCat(d.cats[0][0])}  Categoria campeã: ${nomeCat(d.cats[0][0])}`,
     d.variacao !== null && d.variacao <= -5 ? `📉  Gastei ${Math.abs(d.variacao).toFixed(0)}% menos que no mês anterior` : null,
     `📝  ${d.nLanc} lançamentos em ${d.diasAnot} dias`,
     Object.keys(S.conquistas||{}).length ? `🏅  ${Object.keys(S.conquistas).length} conquistas desbloqueadas` : null].filter(Boolean);
@@ -843,9 +882,71 @@ function quebra(g, txt, x, y, larg, alt){
   g.fillText(lin, x, yy);
 }
 function arred(g, x, y, w, h, r){ g.beginPath(); g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r); g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+/* ---------- retrospectiva do ano ---------- */
+function dadosRetroAno(ano){
+  const ks = Object.keys(S.meses).filter(k => k.startsWith(ano + '-') && k <= chaveHoje() && temDados(S.meses[k])).sort();
+  if (ks.length < 2) return null;
+  memo = {}; memoParc = null; memoFat = null;
+  const cs = ks.map(k => { const o = ymDe(k); return { k, o, C: calc(o.y, o.m) }; });
+  const renda = soma(cs, x=>x.C.renda), gasto = soma(cs, x=>x.C.consumo), guardado = soma(cs, x=>Math.max(0, x.C.reservas));
+  if (gasto <= 0) return null;
+  const cats = {}; cs.forEach(x => Object.entries(x.C.cats).forEach(([c,v]) => cats[c] = (cats[c]||0) + v));
+  const todas = Object.entries(cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const variaveis = todas.filter(([c])=>![CAT_CONTAS,'🧾 Contas','🧾 Parcela'].includes(c)), top = variaveis.length ? variaveis : todas;
+  const porMes = cs.filter(x=>x.C.consumo>0).sort((a,b)=>b.C.consumo-a.C.consumo);
+  let maior = null;
+  ks.forEach(k => S.meses[k].gastos.forEach(g => { const v = (+g.valor) * (g.minha!=null && g.valor ? g.minha/g.valor : 1); if (!maior || v > maior.v) maior = { v, d:g.desc||nomeCat(g.cat), cat:g.cat, data:g.data }; }));
+  const nLanc = soma(ks, k => { const M = S.meses[k]; return M.entradas.length + M.gastos.length + M.contas.length + M.reservas.length; });
+  const diasAnot = new Set(ks.flatMap(k => [...S.meses[k].gastos, ...S.meses[k].entradas].map(i=>i.data).filter(Boolean))).size;
+  const conqAno = Object.entries(S.conquistas||{}).filter(([,d]) => String(d).startsWith(ano)).map(([id]) => CONQUISTAS.find(c=>c.id===id)).filter(Boolean);
+  const quitadas = (S.dividas||[]).filter(dv => dv.quitadaEm && dv.quitadaEm.startsWith(ano));
+  const taxa = renda > 0 ? guardado / renda * 100 : 0;
+  let titulo;
+  if (taxa >= 20) titulo = ['🐷','Mestre da Poupança do Ano',`Você guardou ${taxa.toFixed(0)}% de tudo que entrou. Que ano!`];
+  else if (quitadas.length) titulo = ['🎊','Livre das Dívidas',`Você quitou ${quitadas.length} dívida${quitadas.length>1?'s':''} este ano. Enorme conquista!`];
+  else if (renda > 0 && renda - gasto - guardado < 0) titulo = ['💪','Sobrevivente do Ano','Foi um ano puxado, mas você acompanhou cada real. Isso muda tudo.'];
+  else { const t = TITULO_CAT[top[0][0]]; titulo = t ? [t[0], t[1] + ' do Ano', t[2].replace('este mês','este ano').replace('do mês','do ano')] : ['📊','Mestre da Organização do Ano','Um ano inteiro com tudo anotado. Parabéns!']; }
+  return { ano, ks, renda, gasto, guardado, taxa, cats:top, totVar:soma(top, x=>x[1]), mesCaro:porMes[0], mesBarato:porMes[porMes.length-1], maior, nLanc, diasAnot,
+    seq: maiorSequencia(), conqAno, quitadas, titulo, parcial: ano === hoje.getFullYear() && hoje.getMonth() < 11 };
+}
+function abrirRetroAno(ano){
+  const d = dadosRetroAno(ano); if (!d) return toast('Ainda não há dados suficientes deste ano.');
+  S.retroVistas = S.retroVistas || {}; S.retroVistas['ano-' + ano] = true; salvar();
+  const nomeMes = (x) => MESES[x.o.m];
+  const cofTotal = soma(S.cofrinhos, c => guardadoAte(c.id, ano + '-12'));
+  const slides = [
+    { cls:'r1', html:`<small>Retrospectiva${d.parcial?' (até agora)':''}</small><h2>Seu ${ano}</h2><p>${d.ks.length} meses de vida financeira em algumas telas.</p><span class="r-dica">Toque para continuar →</span>` },
+    { cls:'r2', html:`<small>O ano em números</small>${d.renda?`<div class="r-lin"><span>Entrou</span><b>${brl0(d.renda)}</b></div>`:''}<div class="r-lin"><span>Você gastou</span><b>${brl0(d.gasto)}</b></div><div class="r-lin"><span>Guardou</span><b>${brl0(d.guardado)}</b></div>
+      ${d.renda?`<p class="r-dest">Você guardou <b>${d.taxa.toFixed(0)}%</b> da sua renda ${d.taxa>=10?'🎉':''}</p>`:''}` },
+    { cls:'r3', html:`<small>Categoria campeã do ano</small><div class="r-emoji">${emojiCat(d.cats[0][0])}</div><h2>${esc(nomeCat(d.cats[0][0]))}</h2><p><b>${brl0(d.cats[0][1])}</b> — ${(d.cats[0][1]/d.totVar*100).toFixed(0)}% dos gastos do dia a dia</p>
+      ${d.cats.slice(1,3).map(([c,v],i)=>`<div class="r-lin"><span>${i+2}º ${emojiCat(c)} ${esc(nomeCat(c))}</span><b>${brl0(v)}</b></div>`).join('')}` },
+    d.mesCaro && d.mesBarato && d.mesCaro !== d.mesBarato && { cls:'r4', html:`<small>Mês a mês</small><div class="r-lin"><span>📈 Mês mais caro</span><b>${nomeMes(d.mesCaro)}</b></div><div class="r-lin"><span>📉 Mês mais econômico</span><b>${nomeMes(d.mesBarato)}</b></div>
+      <p class="r-dest">Diferença de <b>${brl0(d.mesCaro.C.consumo - d.mesBarato.C.consumo)}</b> entre os dois.</p>` },
+    d.maior && { cls:'r5', html:`<small>Maior compra do ano</small><div class="r-emoji">${emojiCat(d.maior.cat)}</div><h2>${brl0(d.maior.v)}</h2><p>${esc(d.maior.d)}${d.maior.data?` · ${fmtData(d.maior.data)}`:''}</p>` },
+    { cls:'r6', html:`<small>Seus hábitos</small><div class="r-lin"><span>Lançamentos</span><b>${d.nLanc}</b></div><div class="r-lin"><span>Dias com anotação</span><b>${d.diasAnot}</b></div>${d.seq>1?`<div class="r-lin"><span>Maior sequência</span><b>🔥 ${d.seq} dias</b></div>`:''}` },
+    (d.conqAno.length || cofTotal > 0 || d.quitadas.length) && { cls:'r7', html:`<small>Suas vitórias</small>
+      ${cofTotal>0?`<div class="r-lin"><span>🐷 Nos cofrinhos</span><b>${brl0(cofTotal)}</b></div>`:''}${d.quitadas.length?`<div class="r-lin"><span>🎊 Dívidas quitadas</span><b>${d.quitadas.length}</b></div>`:''}
+      ${d.conqAno.length?`<div class="r-lin"><span>🏅 Conquistas</span><b>${d.conqAno.length}</b></div><p class="r-sub">${d.conqAno.slice(0,6).map(c=>c.e+' '+c.t).join(' · ')}</p>`:''}` },
+    { cls:'r8', final:true, html:`<small>Seu título de ${ano}</small><div class="r-emoji grande">${d.titulo[0]}</div><h2>${d.titulo[1]}</h2><p>${d.titulo[2]}</p>
+      <div class="r-acts"><button class="btn pri" data-retro="compartilhar">📤 Compartilhar</button><button class="btn sec" data-retro="fechar">Fechar</button></div><span class="r-priv">A imagem compartilhada não mostra seus valores.</span>` },
+  ].filter(Boolean);
+  const share = Object.assign({}, d, { k:'ano-' + ano, rotulo: String(ano), linhasShare: [
+    `${emojiCat(d.cats[0][0])}  Categoria campeã: ${nomeCat(d.cats[0][0])}`,
+    d.renda && d.taxa >= 1 ? `🐷  Guardei ${d.taxa.toFixed(0)}% da minha renda` : null,
+    `📝  ${d.nLanc} lançamentos em ${d.diasAnot} dias`,
+    d.quitadas.length ? `🎊  ${d.quitadas.length} dívida${d.quitadas.length>1?'s':''} quitada${d.quitadas.length>1?'s':''}` : (d.conqAno.length ? `🏅  ${d.conqAno.length} conquistas no ano` : null)].filter(Boolean) });
+  retro = { d: share, slides, i:0 };
+  desenharRetro();
+}
+
 // Cartão no Resumo: retrospectiva do mês passado (até o dia 10) ou do mês aberto, se já passou.
 function cardRetro(){
   const kc = key(cur.y,cur.m), kh = chaveHoje();
+  if (kc === kh){
+    const anoR = hoje.getMonth() === 11 ? hoje.getFullYear() : hoje.getMonth() === 0 && hoje.getDate() <= 20 ? hoje.getFullYear() - 1 : null;
+    if (anoR && !(S.retroVistas||{})['ano-' + anoR] && dadosRetroAno(anoR))
+      return `<button class="retro-card ano" data-act="retroAno" data-ano="${anoR}"><span class="rc-e">🎆</span><span><b>Sua retrospectiva de ${anoR} está pronta!</b><small>Seu ano em números, vitórias e o título do ano</small></span><span class="rc-seta">›</span></button>`;
+  }
   if (kc === kh){
     if (hoje.getDate() > 10) return '';
     const p = prevYM(cur.y,cur.m);
@@ -895,6 +996,15 @@ function categorizar(texto){
 }
 function interpretarFrase(frase){
   const out = { tipo:'gastos' };
+  const hashtags = (String(frase).match(/#[\p{L}\p{N}_-]+/gu) || []).map(h => normTag(h));
+  if (hashtags.length){
+    // "#viagem" reaproveita uma etiqueta existente ("Viagem Praia"); "#viagem_praia" vira "Viagem praia"
+    const existentes = todasEtiquetas().map(x=>x.nome);
+    out.tags = hashtags.map(h => { const hn = normTxt(h.replace(/_/g,' '));
+      const e = existentes.find(x => normTxt(x) === hn) || existentes.find(x => normTxt(x).startsWith(hn));
+      const novo = h.replace(/_/g,' '); return e || novo.charAt(0).toUpperCase() + novo.slice(1); });
+    frase = String(frase).replace(/#[\p{L}\p{N}_-]+/gu, ' ');
+  }
   let t = ' ' + normTxt(frase) + ' ';
   const tira = (re) => { t = t.replace(re, ' '); };
   // parcelas: "em 10x", "10 vezes", "parcelado em 3"
@@ -968,6 +1078,7 @@ function aplicarFrase(frase){
     if (r.cartao){ form.v.cartao = r.cartao; const nm = cartaoPorId(r.cartao).nome; $sh.querySelectorAll('[data-chips="cartao"] button').forEach(b=>b.classList.toggle('on', b.dataset.v===nm)); }
     if (r.parcelas) set('fParc', String(Math.min(24, r.parcelas)));
     set('fDesc', r.desc);
+    if (r.tags) set('fTags', [...new Set([...tagsDe((document.getElementById('fTags')||{}).value), ...r.tags])].join(', '));
     infoParcelas();
   }
   const partes = [r.valor ? brl(r.valor) : null,
@@ -1276,6 +1387,7 @@ function telaResumo(){
     ${blocoPrevisao(C)}
   </section>`;
 
+  html += cardTagAtiva();
   html += cardRetro();
   html += dicaTransferir();
   html += lembreteBackup();
@@ -1819,7 +1931,7 @@ function telaLanc(){
     faturasPorCartao(cur.y,cur.m).forEach(f => { h += `<div class="item"><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento}`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></div>`; });
     gs.forEach(g=>{
       const parc = ehParcelado(g);
-      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
+      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
     parcOutras.forEach(x=>{
       h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
@@ -1916,7 +2028,7 @@ function resultadosBusca(q){
   const res = [];
   Object.keys(S.meses).sort().reverse().forEach(k=>{
     const M = S.meses[k];
-    M.gastos.forEach(g=>{ if (bate([g.desc, nomeCat(g.cat), g.forma], g.valor)) res.push({ k, tipo:'gastos', it:g, ic:emojiCat(g.cat), t:g.desc||nomeCat(g.cat),
+    M.gastos.forEach(g=>{ if (bate([g.desc, nomeCat(g.cat), g.forma, ...(g.tags||[])], g.valor)) res.push({ k, tipo:'gastos', it:g, ic:emojiCat(g.cat), t:g.desc||nomeCat(g.cat),
       s:`${nomeCat(g.cat)} · ${g.forma}${ehParcelado(g)?` · ${g.parcelas}x`:''}${g.data?' · '+fmtData(g.data):''}`, v:-g.valor, d:g.data||k }); });
     M.entradas.forEach(e=>{ if (bate([e.nome,'entrada'], e.valor)) res.push({ k, tipo:'entradas', it:e, ic:'💰', t:e.nome, s:`Entrada${e.data?' · '+fmtData(e.data):''}`, v:e.valor, d:e.data||k }); });
     M.contas.forEach(c=>{ if (bate([c.nome,'conta'], c.pago?c.valor:c.planejado)) res.push({ k, tipo:'contas', it:c, ic:'📄', t:c.nome, s:c.pago?`Conta paga${c.data?' em '+fmtData(c.data):''}`:'Conta pendente', v:-(c.pago?c.valor:c.planejado), d:c.data||k }); });
@@ -1959,11 +2071,14 @@ function telaContas(){
 
 function telaMetas(){
   const C = calc(cur.y,cur.m), p = S.perfil;
-  return `<button class="retro-card simular" data-act="possoComprar"><span class="rc-e">🤔</span><span><b>Posso comprar?</b><small>Simule uma compra antes de gastar</small></span><span class="rc-seta">›</span></button>
+  const anos = [...new Set(Object.keys(S.meses).map(k=>+k.slice(0,4)))].sort((a,b)=>b-a).filter(a => dadosRetroAno(a));
+  return `${anos.length ? `<div class="anos-retro">${anos.map(a=>`<button class="btn sec" data-act="retroAno" data-ano="${a}">🎆 ${a === hoje.getFullYear() && hoje.getMonth() < 11 ? a + ' até agora' : 'Retrospectiva ' + a}</button>`).join('')}</div>` : ''}
+  <button class="retro-card simular" data-act="possoComprar"><span class="rc-e">🤔</span><span><b>Posso comprar?</b><small>Simule uma compra antes de gastar</small></span><span class="rc-seta">›</span></button>
   ${cardCofrinhos(false)}
   ${cardCartoes()}
   ${cardDividas()}
   ${cardMeDevem()}
+  ${cardEtiquetas()}
   ${cardOrcamentos(C)}
   ${cardConquistas()}
   <button class="btn sec" data-tab="ajustes">⚙️ Ajustes, backup e instalação</button>`;
@@ -2088,6 +2203,8 @@ function abrirForm(tipo, id, mk, opcoes){
         <div class="note" id="divInfo">Escreva os nomes separados por vírgula.</div></div>`}
       <details class="mais" ${it?'open':''}><summary>Descrição, data e essencial</summary>
         <div class="f"><label>Descrição (opcional)</label><input id="fDesc" placeholder="Ex.: Feira da semana" value="${esc(it?it.desc||'':'')}"></div>
+        <div class="f"><label>🏷️ Etiqueta (opcional)</label><input id="fTags" placeholder="Ex.: Viagem Praia 2026" autocomplete="off" value="${esc(it ? (it.tags||[]).join(', ') : (S.tagAtiva||''))}">
+          ${tagsUsadas().length?`<div class="chips pessoas" style="margin-top:8px">${tagsUsadas().map(t=>`<button type="button" data-addtag="${esc(t)}">🏷️ ${esc(t)}</button>`).join('')}</div>`:''}</div>
         <div class="row2"><div class="f"><label>Data</label><input type="date" id="fData" value="${it?it.data||'':dataPadrao()}"></div>
         <div class="f"><label>Essencial?</label>${chips('essencial',['Sim','Não'],form.v.essencial?'Sim':'Não')}</div></div>
       </details>
@@ -2148,7 +2265,8 @@ function salvarForm(){
     const parcelas = v.forma==='Crédito' ? (+g('fParc')||1) : 1;
     const cartao = v.forma==='Crédito' && cartaoPorId(v.cartao) ? v.cartao : undefined;
     if (cartao) S.ultimoCartao = cartao;
-    obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao };
+    const tags = tagsDe(g('fTags'));
+    obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao, tags: tags.length ? tags : undefined };
     if (!id && v.dividir){ const ps = nomesDe(g('fPessoas')); if (!ps.length) return toast('Com quem você dividiu?');
       obj.dividido = ps; obj.minha = Math.round(valor / (ps.length+1) * 100) / 100; }
     if (id){ const ant = M.gastos.find(x=>x.id===id); if (ant && ant.dividido && ant.valor) obj.minha = Math.round(ant.minha / ant.valor * valor * 100) / 100; }
@@ -2205,7 +2323,7 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao],[data-divida],[data-pessoa],[data-addpessoa],[data-setpessoa]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia],[data-impmodo],[data-cartao],[data-divida],[data-pessoa],[data-addpessoa],[data-setpessoa],[data-etiqueta],[data-addtag]');
   if (!t) return;
   if (DEMO && BLOQ_DEMO.has(t.dataset.act)) return toast('Na demonstração isso fica desligado. Compre para usar com seus dados 😉');
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
@@ -2238,6 +2356,8 @@ document.addEventListener('click', e=>{
   if (t.dataset.cartao && !t.closest('[data-chips]')){ editarCartao(t.dataset.cartao); return; }
   if (t.dataset.divida){ abrirDivida(t.dataset.divida); return; }
   if (t.dataset.pessoa){ abrirPessoa(t.dataset.pessoa); return; }
+  if (t.dataset.etiqueta){ abrirEtiqueta(t.dataset.etiqueta); return; }
+  if (t.dataset.addtag){ const i = document.getElementById('fTags'), atuais = tagsDe(i.value); if (!atuais.includes(t.dataset.addtag)) i.value = [...atuais, t.dataset.addtag].join(', '); return; }
   if (t.dataset.addpessoa){ const i = document.getElementById('fPessoas'), atuais = nomesDe(i.value); if (!atuais.includes(t.dataset.addpessoa)) i.value = [...atuais, t.dataset.addpessoa].join(', '); infoDivisao(); return; }
   if (t.dataset.setpessoa){ document.getElementById('rPessoa').value = t.dataset.setpessoa; return; }
   if (t.dataset.impmodo){ imp.modo = t.dataset.impmodo; prepararImportacao(); const top = $sh.scrollTop; desenharImportacao(); $sh.scrollTop = top; return; }
@@ -2327,6 +2447,7 @@ document.addEventListener('click', e=>{
   else if (a==='tgRetirada'){ form.v.retirada=!form.v.retirada; t.classList.toggle('on',form.v.retirada); }
   else if (a==='ouvir'){ ouvirFrase(t); }
   else if (a==='retro'){ abrirRetro(+t.dataset.y, +t.dataset.m); }
+  else if (a==='retroAno'){ abrirRetroAno(+t.dataset.ano); }
   else if (a==='olho'){ S.ocultar = !S.ocultar; salvar(); render(); toast(S.ocultar ? 'Valores escondidos 👁️' : 'Valores visíveis'); }
   else if (a==='criarSenha' || a==='trocarSenha'){ telaPin('criar'); }
   else if (a==='removerSenha'){ if (confirm('Remover a senha do app?')){ delete S.seguranca; salvar(); render(); toast('Senha removida'); } }
@@ -2342,6 +2463,13 @@ document.addEventListener('click', e=>{
   else if (a==='notif'){ alternarNotif(t.dataset.tipo); }
   else if (a==='notifTeste'){ testarNotif(); }
   else if (a==='possoComprar'){ abrirPossoComprar(); }
+  else if (a==='tagAtiva'){ const tg = t.dataset.tag; S.tagAtiva = S.tagAtiva === tg ? null : tg; salvar(); render(); if (form === null && document.getElementById('overlay').classList.contains('open')) abrirEtiqueta(tg); toast(S.tagAtiva ? `Gastos novos serão marcados com “${tg}”` : 'Etiqueta desligada'); }
+  else if (a==='renomearTag'){ const velho = t.dataset.tag, novo = normTag(prompt('Novo nome da etiqueta:', velho)); if (!novo || novo === velho) return;
+    Object.values(S.meses).forEach(M => M.gastos.forEach(g => { if ((g.tags||[]).includes(velho)) g.tags = [...new Set(g.tags.map(x => x === velho ? novo : x))]; }));
+    if (S.tagAtiva === velho) S.tagAtiva = novo; salvar(); render(); abrirEtiqueta(novo); toast('Etiqueta renomeada ✓'); }
+  else if (a==='removerTag'){ const tg = t.dataset.tag; if (!confirm(`Remover a etiqueta “${tg}” de todos os gastos? Os gastos continuam lançados.`)) return;
+    Object.values(S.meses).forEach(M => M.gastos.forEach(g => { if (g.tags){ g.tags = g.tags.filter(x => x !== tg); if (!g.tags.length) delete g.tags; } }));
+    if (S.tagAtiva === tg) S.tagAtiva = null; salvar(); fechar(); render(); toast('Etiqueta removida'); }
   else if (a==='novoAReceber'){ novoAReceber(); }
   else if (a==='salvarAReceber'){ salvarAReceber(); }
   else if (a==='tgEmprestei'){ form.v.emprestei = !form.v.emprestei; t.classList.toggle('on', form.v.emprestei); }
@@ -2497,7 +2625,7 @@ function exportarCsv(){
     const M = S.meses[k];
     M.entradas.forEach(e=>add(k, e.data, 'Entrada', e.nome, '', '', '', e.valor, '', e.fixa?'Repete todo mês':''));
     const formaCsv = (g) => g.forma + (cartaoPorId(g.cartao) ? ` (${cartaoPorId(g.cartao).nome})` : '');
-    M.gastos.filter(g=>!ehParcelado(g)).forEach(g=>add(k, g.data, 'Gasto', g.desc||nomeCat(g.cat), nomeCat(g.cat), formaCsv(g), '', g.valor, g.essencial?'Sim':'Não', ''));
+    M.gastos.filter(g=>!ehParcelado(g)).forEach(g=>add(k, g.data, 'Gasto', g.desc||nomeCat(g.cat), nomeCat(g.cat), formaCsv(g), '', g.valor, g.essencial?'Sim':'Não', (g.tags||[]).length ? 'Etiqueta: ' + g.tags.join(', ') : ''));
     (parcelas()[k]||[]).forEach(x=>{ const o = ymDe(k), d = x.g.data ? key(o.y,o.m)+'-'+String(Math.min(+x.g.data.slice(8,10), diasNoMes(o.y,o.m))).padStart(2,'0') : '';
       add(k, d, 'Gasto', x.g.desc||nomeCat(x.g.cat), nomeCat(x.g.cat), 'Crédito', `${x.i+1}/${x.n}`, x.valor, x.g.essencial?'Sim':'Não', `Compra de ${valorBR(x.g.valor)} em ${mesBR(x.origem)}`); });
     M.contas.forEach(c=>add(k, c.data, 'Conta', c.nome, 'Contas fixas', '', '', c.pago?c.valor:(c.planejado||c.valor), '', c.pago?'Paga':`Pendente${c.venc?' (vence dia '+c.venc+')':''}`));
@@ -2753,6 +2881,7 @@ function dadosDemo(){
     if (off === -1) M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'note', valor:400, nome:'', data:dia(28) });
     if (off === 0 && lim >= 9){ const jt = { id:uid(), cat:'🍗 Alimentação', desc:'Jantar com amigos', valor:240, minha:80, dividido:['Ana','Bruno'], forma:'Crédito', cartao:'nubank', data:dia(9), essencial:false, parcelas:1 };
       M.gastos.push(jt); ['Ana','Bruno'].forEach(p => D.aReceber.push({ id:uid(), pessoa:p, desc:'Jantar com amigos', valor:80, data:jt.data, recebido:false, gastoId:jt.id, mk:k })); }
+    if (off === -1){ g('🎉 Lazer','Passeio de barco', 180, 'Crédito', 20, { tags:['Viagem Praia'] }); g('🍗 Alimentação','Restaurante na praia', 145, 'Crédito', 21, { tags:['Viagem Praia'] }); g('⛽ Gasolina','Posto na estrada', 210, 'Débito', 19, { tags:['Viagem Praia'] }); g('🏠 Casa','Pousada', 620, 'Crédito', 19, { tags:['Viagem Praia'] }); }
     if (off === -1) D.aReceber.push({ id:uid(), pessoa:'Carlos', desc:'Ingresso do show', valor:150, data:dia(12), recebido:false });
     M.auto = true;
   }

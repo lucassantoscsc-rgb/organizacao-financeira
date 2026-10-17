@@ -1,7 +1,7 @@
 {
-  "versao": 32,
+  "versao": 33,
   "novidades": [
-    "👥 Dividir conta: ao lançar um gasto, divida com amigos. Nas categorias conta só a sua parte, e o app anota quanto cada um te deve.",
-    "🤝 Me devem: veja quem te deve, marque o que já recebeu e mande uma cobrança educada pelo WhatsApp com sua chave Pix."
+    "🏷️ Etiquetas: marque gastos de um evento (ex.: “Viagem Praia”) e veja quanto custou no total. Use #viagem no lançamento por frase ou ligue a etiqueta para marcar todos os gastos novos.",
+    "🎆 Retrospectiva do ano: seu ano em números, vitórias e o título do ano. Em Planejar, e na tela inicial em dezembro."
   ]
 }
