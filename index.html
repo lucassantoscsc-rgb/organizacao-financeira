@@ -27,6 +27,7 @@
   --danger-soft:#fde8e8; --danger-ink:#8f1c1c; --warn-ink:#6b4a10; --info-soft:#eef6f5; --info-ink:#0b3b3a;
   --check:#b9cbc8; --grab:#d5dfdd; --tg-off:#cfdcd9; --grid:#e8efed; --axis:#c9d6d3; --cat-dim:#9fc9c3; --dot-no:#c3d3d0;
   --tour-bg:#0b3b3a; --tour-ink:#fff; --tour-muted:rgba(255,255,255,.82); --tour-accent:#5eead4; --tour-btn:#2dd4bf; --tour-btn-ink:#062e2b; --tour-sec:rgba(255,255,255,.14);
+  --heat1:#d9f2ee; --heat2:#a6e0d6; --heat3:#4fbfb0; --heat4:#0f7f74; --heat-ink4:#fff;
   --ent:#1baf7a; --sai:#eb6834; --pend:#f2c1c3; --overlay:rgba(10,30,29,.45); --toast-bg:#10201f; --toast-ink:#fff;
   color-scheme:light;
 }
@@ -41,6 +42,7 @@
   --danger-soft:#3b1c1e; --danger-ink:#f5a5a7; --warn-ink:#f0c879; --info-soft:#15302c; --info-ink:#a7e9de;
   --check:#4a5e5a; --grab:#3a4a47; --tg-off:#3a4a47; --grid:#22302d; --axis:#3a4a47; --cat-dim:#2f5c56; --dot-no:#4a5e5a;
   --tour-bg:#f1fbf9; --tour-ink:#0b2a28; --tour-muted:#3d5653; --tour-accent:#0f766e; --tour-btn:#0b3b3a; --tour-btn-ink:#fff; --tour-sec:#dcefeb;
+  --heat1:#17332f; --heat2:#1e5a52; --heat3:#2a8f81; --heat4:#45c9b6; --heat-ink4:#062e2b;
   --ent:#199e70; --sai:#d95926; --pend:#6b3438; --overlay:rgba(0,0,0,.6); --toast-bg:#e4eeec; --toast-ink:#10201f;
   color-scheme:dark;
 }}
@@ -55,6 +57,7 @@
   --danger-soft:#3b1c1e; --danger-ink:#f5a5a7; --warn-ink:#f0c879; --info-soft:#15302c; --info-ink:#a7e9de;
   --check:#4a5e5a; --grab:#3a4a47; --tg-off:#3a4a47; --grid:#22302d; --axis:#3a4a47; --cat-dim:#2f5c56; --dot-no:#4a5e5a;
   --tour-bg:#f1fbf9; --tour-ink:#0b2a28; --tour-muted:#3d5653; --tour-accent:#0f766e; --tour-btn:#0b3b3a; --tour-btn-ink:#fff; --tour-sec:#dcefeb;
+  --heat1:#17332f; --heat2:#1e5a52; --heat3:#2a8f81; --heat4:#45c9b6; --heat-ink4:#062e2b;
   --ent:#199e70; --sai:#d95926; --pend:#6b3438; --overlay:rgba(0,0,0,.6); --toast-bg:#e4eeec; --toast-ink:#10201f;
   color-scheme:dark;
 }
@@ -434,6 +437,32 @@ body.privado #app,body.privado .overlay{filter:blur(18px)}
 .assin-mini{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
 .assin-mini span{font-size:13px;background:var(--track);border-radius:99px;padding:5px 10px}
 .assin-ign{font-size:12px;color:var(--muted);text-decoration:underline;padding:4px 0 0}
+
+/* calendário */
+.seg button{white-space:nowrap}
+.cal-card{padding:14px}
+.cal-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px}
+.cal-kpis div{background:var(--surface-2);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column}
+.cal-kpis span{font-size:11.5px;color:var(--muted)}.cal-kpis b{font-size:15px}.cal-kpis small{font-size:11px;color:var(--muted);font-weight:500}
+.cal-sem,.cal-grade{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-sem span{text-align:center;font-size:11px;font-weight:700;color:var(--muted);padding-bottom:4px}
+.cal-dia{aspect-ratio:1/1.08;border-radius:10px;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:4px 1px 3px;position:relative;border:2px solid transparent;min-width:0}
+.cal-dia .cal-n{font-size:12.5px;font-weight:700}
+.cal-dia .cal-v{font-size:9.5px;font-weight:600;letter-spacing:-.02em;line-height:1.1;white-space:nowrap;overflow:hidden;max-width:100%}
+.cal-dia .cal-dots{display:flex;gap:2px;margin-top:auto;height:6px}
+.cal-dia.h1{background:var(--heat1)}.cal-dia.h2{background:var(--heat2)}.cal-dia.h3{background:var(--heat3)}
+.cal-dia.h4{background:var(--heat4);color:var(--heat-ink4)}
+.cal-dia.futuro{background:none;border:1.5px dashed var(--line)}
+.cal-dia.futuro .cal-n{color:var(--muted);font-weight:600}
+.cal-dia.hoje{border-color:var(--ink)}
+.cal-dia.sel{box-shadow:0 0 0 2px var(--surface),0 0 0 4px var(--teal)}
+.cal-dots i,.cal-leg i[class^="dot"]{display:inline-block;width:6px;height:6px;border-radius:50%}
+.dot-ent{background:var(--good)}.dot-venc{background:var(--bad)}.dot-paga{background:var(--muted)}
+.cal-leg{display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11.5px;color:var(--muted);margin-top:12px;align-items:center}
+.cal-leg span{display:inline-flex;align-items:center;gap:5px}
+.cal-esc{margin-left:auto}
+.cal-esc i{display:inline-block;width:12px;height:12px;border-radius:3px}
+.cal-esc .h1{background:var(--heat1)}.cal-esc .h2{background:var(--heat2)}.cal-esc .h3{background:var(--heat3)}.cal-esc .h4{background:var(--heat4)}
 
 /* busca */
 .busca{position:relative;margin-bottom:12px}

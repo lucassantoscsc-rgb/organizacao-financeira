@@ -20,7 +20,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 21;
+const APP_VERSAO = 22;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -73,8 +73,9 @@ function salvar(){ try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } c
 const hoje = new Date();
 let cur = { y: hoje.getFullYear(), m: hoje.getMonth() };   // mês aberto
 let aba = 'resumo', subLanc = 'gastos';
-let evoSel = null;
-let busca = '';      // texto da busca em Lançamentos   // mês destacado no gráfico de evolução
+let evoSel = null;   // mês destacado no gráfico de evolução
+let busca = '';      // texto da busca em Lançamentos
+let calSel = null;   // dia selecionado no calendário
 
 /* ---------- utilidades ---------- */
 // Com "esconder valores" ligado (👁️ no topo), todo valor em reais aparece como R$ •••••.
@@ -1107,7 +1108,8 @@ function telaLanc(){
   h += `<div class="seg">
     <button class="${subLanc==='entradas'?'on':''}" data-sub="entradas">Entradas</button>
     <button class="${subLanc==='gastos'?'on':''}" data-sub="gastos">Gastos</button>
-    <button class="${subLanc==='reservas'?'on':''}" data-sub="reservas">Reservas</button></div>`;
+    <button class="${subLanc==='reservas'?'on':''}" data-sub="reservas">Reservas</button>
+    <button class="${subLanc==='calendario'?'on':''}" data-sub="calendario">Calendário</button></div>`;
   if (subLanc==='entradas'){
     const tot = C.entradas;
     h += `<div class="totalrow"><span>Total de entradas</span><b class="num">${brl(tot)}</b></div><div class="list">`;
@@ -1137,7 +1139,77 @@ function telaLanc(){
     if (!M.reservas.length) h += vazio('🐷','Nada guardado neste mês','Guarde num cofrinho ou registre um investimento.');
     h += `</div>`;
   }
+  if (subLanc==='calendario') h += telaCalendario();
   return h + `</div>`;
+}
+
+/* ---------- calendário financeiro ----------
+   Cada dia: cor pela soma dos gastos (quanto mais escuro, mais gasto), marcadores de entrada e de contas.
+   Tocar num dia mostra tudo o que aconteceu nele. */
+function diasDoMes(y, m){
+  const k = key(y,m), M = mes(y,m), D = diasNoMes(y,m);
+  const dias = Array.from({ length:D+1 }, () => ({ itens:[], gasto:0, entrada:0, aVencer:0, pagas:0 }));
+  const dia = (data) => data && data.startsWith(k) ? Math.min(+data.slice(8,10), D) : 0;   // 0 = sem data
+  const diaDe = (data) => data ? Math.min(+data.slice(8,10), D) : 0;
+  M.gastos.filter(g=>!ehParcelado(g)).forEach(g => { const d = dia(g.data); dias[d].gasto += +g.valor;
+    dias[d].itens.push({ tipo:'gastos', id:g.id, mk:k, ic:emojiCat(g.cat), t:g.desc||nomeCat(g.cat), s:g.forma, v:-g.valor }); });
+  parcelasDoMes(y,m).forEach(x => { const d = diaDe(x.g.data); dias[d].gasto += x.valor;
+    dias[d].itens.push({ tipo:'gastos', id:x.g.id, mk:x.origem, ic:emojiCat(x.g.cat), t:x.g.desc||nomeCat(x.g.cat), s:`Parcela ${x.i+1}/${x.n}`, v:-x.valor }); });
+  M.entradas.forEach(e => { const d = dia(e.data); dias[d].entrada += +e.valor;
+    dias[d].itens.push({ tipo:'entradas', id:e.id, mk:k, ic:'💰', t:e.nome, s:'Entrada', v:+e.valor }); });
+  M.contas.forEach(c => {
+    if (c.pago){ const d = dia(c.data); dias[d].gasto += +c.valor; dias[d].pagas++;
+      dias[d].itens.push({ tipo:'contas', id:c.id, mk:k, ic:'✅', t:c.nome, s:'Conta paga', v:-c.valor }); }
+    else { const d = c.venc ? Math.min(+c.venc, D) : 0; dias[d].aVencer++;
+      dias[d].itens.push({ tipo:'contas', id:c.id, mk:k, ic:'⏰', t:c.nome, s:'Conta a vencer', v:-(c.planejado||c.valor), pendente:true }); }
+  });
+  M.reservas.forEach(r => { const d = dia(r.data); const c = cofPorId(cofDe(r));
+    dias[d].itens.push({ tipo:'reservas', id:r.id, mk:k, ic:c?c.emoji:'📈', t:r.nome||(c?c.nome:r.tipo), s:r.valor<0?'Retirada':'Guardado', v:-r.valor }); });
+  return dias;
+}
+const valorCurto = (v) => S.ocultar ? '•••' : v >= 1000 ? (v/1000).toLocaleString('pt-BR',{maximumFractionDigits:1}) + ' mil' : Math.round(v).toLocaleString('pt-BR');
+function telaCalendario(){
+  const y = cur.y, m = cur.m, D = diasNoMes(y,m), dias = diasDoMes(y,m);
+  const ehMesAtual = key(y,m) === chaveHoje(), hojeD = hoje.getDate();
+  const ultimoDia = ehMesAtual ? hojeD : key(y,m) < chaveHoje() ? D : 0;   // dias já vividos
+  const max = Math.max(...dias.slice(1).map(d=>d.gasto), 0);
+  if (!calSel || calSel.k !== key(y,m)){
+    const primeiroComAlgo = dias.findIndex((d,i)=>i>0 && d.itens.length);
+    calSel = { k:key(y,m), d: ehMesAtual ? hojeD : (primeiroComAlgo > 0 ? primeiroComAlgo : 1) };
+  }
+  const nivel = (v) => !v || !max ? 0 : Math.max(1, Math.ceil(v/max*4));
+  // resumo
+  const vividos = dias.slice(1, ultimoDia+1);
+  const semGasto = vividos.filter(d=>d.gasto===0).length;
+  const totalGasto = soma(dias, d=>d.gasto);
+  const diaMax = max ? dias.findIndex((d,i)=>i>0 && d.gasto===max) : 0;
+  let h = `<section class="card cal-card">`;
+  if (ultimoDia){
+    h += `<div class="cal-kpis">
+      <div><span>Dias sem gastar</span><b>${semGasto} <small>de ${ultimoDia}</small></b></div>
+      <div><span>Média por dia</span><b class="num">${brl0(totalGasto/ultimoDia)}</b></div>
+      <div><span>Maior gasto</span><b>${diaMax?`dia ${diaMax}`:'—'}</b></div></div>`;
+  }
+  // grade
+  const inicio = new Date(y, m, 1).getDay();
+  h += `<div class="cal-sem">${['D','S','T','Q','Q','S','S'].map(d=>`<span>${d}</span>`).join('')}</div><div class="cal-grade" role="grid">`;
+  for (let i=0;i<inicio;i++) h += '<span class="cal-vazio"></span>';
+  for (let d=1; d<=D; d++){
+    const x = dias[d], n = nivel(x.gasto), futuro = d > ultimoDia;
+    const cls = ['cal-dia', 'h'+n, futuro?'futuro':'', ehMesAtual && d===hojeD ? 'hoje' : '', calSel.d===d ? 'sel' : ''].join(' ');
+    h += `<button class="${cls}" data-dia="${d}" aria-label="Dia ${d}${x.gasto?', gastou '+brl(x.gasto):''}${x.aVencer?', '+x.aVencer+' conta a vencer':''}">
+      <span class="cal-n">${d}</span>${x.gasto?`<span class="cal-v">${valorCurto(x.gasto)}</span>`:''}
+      <span class="cal-dots">${x.entrada?'<i class="dot-ent"></i>':''}${x.aVencer?'<i class="dot-venc"></i>':''}${x.pagas?'<i class="dot-paga"></i>':''}</span></button>`;
+  }
+  h += `</div><div class="cal-leg"><span><i class="dot-ent"></i>Entrada</span><span><i class="dot-venc"></i>Conta a vencer</span><span><i class="dot-paga"></i>Conta paga</span>
+    <span class="cal-esc">menos <i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i> mais gasto</span></div></section>`;
+  // detalhe do dia
+  const x = dias[calSel.d], nomeDia = DIAS_SEMANA[new Date(y, m, calSel.d).getDay()];
+  h += `<div class="totalrow"><span><b>${calSel.d} de ${MESES[m].toLowerCase()}</b> · ${nomeDia}</span>${x.gasto?`<span>Gastos <b class="num">${brl(x.gasto)}</b></span>`:''}</div>`;
+  h += `<div class="list">${x.itens.map(i=>`<button class="item" data-edit="${i.tipo}" data-id="${i.id}" data-mk="${i.mk}"><div class="ic">${i.ic}</div><div class="tx"><div class="t1">${esc(i.t)}</div><div class="t2">${esc(i.s)}</div></div><div class="val num ${i.v>0?'up':''}" ${i.pendente?'style="color:var(--muted)"':''}>${brl(Math.abs(i.v))}</div></button>`).join('')
+    || vazio(calSel.d > ultimoDia ? '🗓️' : '🎉', calSel.d > ultimoDia ? 'Nada previsto para este dia' : 'Nenhum gasto neste dia', calSel.d > ultimoDia ? '' : 'Dia sem gastar conta pontos 😉')}</div>`;
+  if (dias[0].itens.length) h += `<p class="note">${dias[0].itens.length} lançamento(s) deste mês sem data não aparecem no calendário.</p>`;
+  return h;
 }
 
 // Busca em todos os meses: descrição, nome, categoria, forma de pagamento ou valor.
@@ -1380,7 +1452,7 @@ function salvarForm(){
   if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
   else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo(); }
   salvar(); fechar();
-  if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
+  if (aba==='lanc' && subLanc==='calendario') {} else if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
   toast(tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
   checarConquistas();
@@ -1414,7 +1486,7 @@ window.addEventListener('beforeinstallprompt', e=>{ e.preventDefault(); deferred
 document.addEventListener('click', e=>{
   const evo = e.target.closest('[data-evo]');
   if (evo){ evoSel = evo.dataset.evo; render(); return; }
-  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof]');
+  const t = e.target.closest('[data-act],[data-tab],[data-sub],[data-edit],[data-new],[data-pay],[data-chips] button:not([data-act]),[data-cat],[data-catsel],[data-rec],[data-cof],[data-dia]');
   if (!t) return;
   if (t.parentElement && t.parentElement.dataset.chips && !t.dataset.act){
     const name = t.parentElement.dataset.chips;
@@ -1437,6 +1509,7 @@ document.addEventListener('click', e=>{
   if (t.dataset.cof){ abrirCofrinho(t.dataset.cof); return; }
   if (t.dataset.tab){ fechar(); aba=t.dataset.tab; render(); scrollTo(0,0); return; }
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
+  if (t.dataset.dia){ calSel = { k:key(cur.y,cur.m), d:+t.dataset.dia }; render(); return; }
   if (t.dataset.edit){ abrirForm(t.dataset.edit, t.dataset.id, t.dataset.mk); return; }
   if (t.dataset.new){ const v = document.getElementById('fValor'); const val = v ? v.value : ''; abrirForm(t.dataset.new); const n = document.getElementById('fValor'); if (n && val) n.value = val; return; }
   if (t.dataset.pay){

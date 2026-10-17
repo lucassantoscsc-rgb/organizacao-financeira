@@ -1,7 +1,6 @@
 {
-  "versao": 21,
+  "versao": 22,
   "novidades": [
-    "🔁 Detector de assinaturas: o app encontra os gastos que se repetem todo mês (Netflix, Spotify, academia…) e mostra quanto custam por mês e por ano.",
-    "📈 Avisa quando uma assinatura fica mais cara."
+    "📅 Calendário financeiro: em Lançamentos → Calendário, veja seus gastos dia a dia, as contas a vencer e quantos dias você passou sem gastar."
   ]
 }
