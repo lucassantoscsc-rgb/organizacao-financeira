@@ -21,7 +21,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 38;
+const APP_VERSAO = 39;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -2534,11 +2534,11 @@ const apiAparelhos = (dados) => fetch('api/aparelhos', { method:'POST', headers:
   body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), nome:nomeAparelho(), ...dados }) })
   .then(r => r.json().then(d => ({ status:r.status, d })));
 
-// Ao abrir com internet (no máximo a cada 6 horas), confere se este aparelho ainda tem acesso.
+// Ao abrir com internet (no máximo uma vez por dia), confere se este aparelho ainda tem acesso.
 // Desconecta se foi removido pelo dono, se o acesso foi excluído ou reembolsado. Erros de rede são ignorados.
 function verificarAcesso(){
   if (!CONFIG.exigirCodigo || !S.liberado || !S.conta || !navigator.onLine) return;
-  if (S.verificadoEm && Date.now() - new Date(S.verificadoEm).getTime() < 6*3600e3) return;
+  if (S.verificadoEm && Date.now() - new Date(S.verificadoEm).getTime() < 24*3600e3) return;
   apiAparelhos({ acao:'verificar' }).then(({status,d}) => {
     if (status === 403) desconectar(d.motivo === 'removido'
       ? 'Este aparelho foi removido da sua conta. Para usar aqui de novo, entre com seu e-mail.'
