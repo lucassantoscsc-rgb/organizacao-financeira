@@ -840,14 +840,18 @@ function abrirLista(){
     <p class="note" style="margin:0 0 14px">Seria um <b>plano opcional, com mensalidade</b>, porque a conexão com os bancos tem um custo mensal. <b>O Tino que você comprou continua vitalício</b>, sem nada a pagar.</p>
     <div class="f"><label>Quanto você pagaria por mês por isso?</label><div class="opcoes" id="lPreco">${PRECOS_LISTA.map(([v,l])=>`<button data-act="listaPreco" data-v="${v}">${l}</button>`).join('')}</div></div>
     <div class="f"><label>Quais bancos você usa? (pode marcar vários)</label><div class="opcoes" id="lBancos">${BANCOS_LISTA.map(b=>`<button data-act="listaBanco" data-v="${esc(b)}">${esc(b)}</button>`).join('')}</div></div>
+    ${S.conta.includes('@') ? '' : '<div class="f"><label>Seu e-mail, para avisarmos</label><input id="lEmail" type="email" inputmode="email" autocomplete="email" placeholder="seuemail@exemplo.com"></div>'}
     <button class="btn pri" data-act="listaEntrar">Entrar na lista de espera</button>
-    <p class="note" style="text-align:center;margin-top:10px">Vamos avisar no e-mail ${esc(S.conta)} quando estiver disponível.</p>`);
+    ${S.conta.includes('@') ? `<p class="note" style="text-align:center;margin-top:10px">Vamos avisar no e-mail ${esc(S.conta)} quando estiver disponível.</p>` : ''}`);
 }
 function entrarLista(btn){
   if (!listaSel.preco) return toast('Escolha quanto você pagaria por mês');
+  // Quem entrou com código (sem e-mail) informa o e-mail aqui.
+  const email = S.conta.includes('@') ? S.conta : (document.getElementById('lEmail')?.value || '').trim();
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(email)) return toast('Digite um e-mail válido');
   btn.disabled = true; btn.textContent = 'Enviando…';
   fetch('api/lista', { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ email:S.conta, preco:listaSel.preco, bancos:listaSel.bancos, de:'app', cliente:true }) })
+    body: JSON.stringify({ email, preco:listaSel.preco, bancos:listaSel.bancos, de:'app', cliente:true }) })
     .then(r => { if (!r.ok) throw 0; S.lista = new Date().toISOString(); salvar(); fechar(); render(); toast('Você está na lista! Vamos te avisar 💚'); })
     .catch(() => { btn.disabled = false; btn.textContent = 'Entrar na lista de espera'; toast('Não foi possível enviar. Confira a internet.'); });
 }
