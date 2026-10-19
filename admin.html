@@ -69,6 +69,13 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
       <div id="lista"></div>
     </div>
     <div class="card">
+      <h2>Lista de espera: Tino Conectado</h2>
+      <div class="stats" id="listaStats"></div>
+      <div id="listaResumo"></div>
+      <button class="sec" id="copiarLista" style="margin-top:10px">Copiar e-mails</button>
+      <div id="listaItens" style="margin-top:6px"></div>
+    </div>
+    <div class="card">
       <h2>Depoimentos do app</h2>
       <div class="stats" id="depStats"></div>
       <div id="deps"></div>
@@ -100,7 +107,24 @@ async function entrar(){
 const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const data = iso => iso ? new Date(iso).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : '';
 
-async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); }
+async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); carregarLista(); }
+let espera = [];
+const PRECO_TXT = { ate10:'até R$9,90', ate15:'até R$14,90', ate20:'até R$19,90', mais20:'mais de R$20', nao:'não pagaria', '':'não respondeu' };
+async function carregarLista(){ espera = (await api({acao:'lista'})).lista; desenharLista(); }
+function desenharLista(){
+  const conta = (f) => { const m = {}; espera.forEach(x => [].concat(f(x)).forEach(v => m[v] = (m[v]||0)+1)); return Object.entries(m).sort((a,b)=>b[1]-a[1]); };
+  const clientes = espera.filter(x=>x.cliente).length;
+  document.getElementById('listaStats').textContent = `${espera.length} inscritos · ${clientes} já são clientes do app · ${espera.filter(x=>x.de==='app').length} pelo app, ${espera.filter(x=>x.de!=='app').length} pela página`;
+  const barras = (pares) => pares.map(([k,n]) => `<div class="n" style="display:flex;gap:8px"><span style="flex:1">${esc(k)}</span><b>${n}</b> <span>(${Math.round(n*100/espera.length)}%)</span></div>`).join('');
+  document.getElementById('listaResumo').innerHTML = espera.length
+    ? `<p class="stats" style="margin:8px 0 4px"><b>Quanto pagariam por mês</b></p>${barras(conta(x=>PRECO_TXT[x.preco||'']))}
+       <p class="stats" style="margin:12px 0 4px"><b>Bancos</b></p>${barras(conta(x=>x.bancos||[]))}`
+    : '<p class="stats">Ninguém na lista ainda.</p>';
+  document.getElementById('listaItens').innerHTML = espera.slice(0,50).map(x => `<div class="item"><span>${esc(x.email)}</span>${x.cliente?'<span class="tag ok">cliente</span>':''}<span class="n">${PRECO_TXT[x.preco||'']} · ${(x.bancos||[]).map(esc).join(', ')||'sem bancos'} · ${x.de==='app'?'pelo app':'pela página'} · ${data(x.em)}</span></div>`).join('');
+}
+document.getElementById('copiarLista').onclick = async () => {
+  try { await navigator.clipboard.writeText(espera.map(x=>x.email).join('\n')); alert(espera.length + ' e-mails copiados!'); } catch(e){ alert('Não consegui copiar.'); }
+};
 let deps = [];
 async function carregarDeps(){ deps = (await api({acao:'depoimentos'})).lista; desenharDeps(); }
 function desenharDeps(){

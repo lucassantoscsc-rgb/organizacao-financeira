@@ -52,6 +52,13 @@ module.exports = async (req, res) => {
       lista.sort((a, b) => b.em.localeCompare(a.em));
       return res.json({ ok: true, lista });
     }
+    if (acao === 'lista') {
+      const d = (await redis('HGETALL', 'lista')) || [];
+      const lista = [];
+      for (let i = 0; i < d.length; i += 2) lista.push({ email: d[i], ...JSON.parse(d[i + 1]) });
+      lista.sort((a, b) => b.em.localeCompare(a.em));
+      return res.json({ ok: true, lista });
+    }
     if (acao === 'apagarDepoimento') {
       await redis('HDEL', 'depoimentos', codigo);
       return res.json({ ok: true });
