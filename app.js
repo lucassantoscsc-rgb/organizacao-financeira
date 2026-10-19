@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 41;
+const APP_VERSAO = 42;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -825,9 +825,10 @@ async function desligarNuvem(){
 /* ---------- central de ajuda ---------- */
 const PERGUNTAS_AJUDA = [
   ['📲 Como instalo o app na tela de início?', 'No <b>iPhone</b>, abra o link no Safari, toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> e depois em <b>Adicionar à Tela de Início</b>. No <b>Android</b>, abra no Chrome, toque no menu <span class="kbd">⋮</span> e em <b>Instalar app</b>. Depois, abra sempre pelo ícone do Tino.'],
-  ['🔄 Troquei de celular. Como levo meus dados?', 'Seus dados ficam só no aparelho. No celular antigo, vá em <b>Ajustes → Backup dos dados → Fazer backup</b> e guarde o arquivo (Drive, iCloud, WhatsApp ou e-mail). No celular novo, entre com o mesmo e-mail e use <b>Restaurar backup</b>.'],
+  ['🔄 Troquei de celular. Como levo meus dados?', 'Com o <b>backup na nuvem</b> ligado (em <b>Ajustes → Backup dos dados</b>), é só entrar no celular novo com o mesmo e-mail: o app oferece recuperar tudo com a senha do backup. Sem ele, faça <b>Fazer backup</b> no celular antigo, guarde o arquivo e use <b>Restaurar backup</b> no novo.'],
+  ['🔑 Esqueci a senha do backup na nuvem', 'Por segurança, ninguém consegue abrir o backup sem a senha, nem a nossa equipe. Seus dados neste celular continuam aqui: em <b>Ajustes</b>, desligue o backup na nuvem e ative de novo com uma senha nova.'],
   ['🤔 Por que os dados de um aparelho não aparecem no outro?', 'Cada aparelho guarda os próprios dados, para sua privacidade. No iPhone, o app instalado e o Safari também são separados. Para levar os dados de um para o outro, use o backup.'],
-  ['💾 Como faço backup?', 'Em <b>Ajustes → Backup dos dados</b>, toque em <b>Fazer backup</b>. Recomendamos uma vez por semana. O app avisa quando faz tempo que você não faz.'],
+  ['💾 Como faço backup?', 'O mais fácil é ativar o <b>backup na nuvem</b> em <b>Ajustes → Backup dos dados</b>: ele é feito sozinho uma vez por dia e é criptografado com uma senha que só você sabe. Você também pode tocar em <b>Fazer backup</b> para guardar um arquivo.'],
   ['🎙️ Como lanço um gasto falando ou escrevendo?', 'Ao lançar um gasto, use o campo com ✨ no topo e escreva ou dite algo como <b>“gastei 45 no ifood no crédito”</b>. O app preenche valor, categoria e forma de pagamento. No iPhone, toque no microfone do teclado para ditar.'],
   ['💳 Como funcionam os cartões e as faturas?', 'Em <b>Planejar → Cartões</b>, cadastre o dia de fechamento e de vencimento. Ao lançar uma compra no crédito, ela cai na fatura certa, e as parcelas entram sozinhas nos próximos meses.'],
   ['🔒 Como coloco senha ou Face ID?', 'Em <b>Ajustes → Privacidade</b>, crie uma senha de 4 dígitos. Depois disso, aparece a opção de entrar com Face ID ou digital, se o seu aparelho tiver.'],

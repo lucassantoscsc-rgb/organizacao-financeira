@@ -1,6 +1,4 @@
 {
-  "versao": 41,
-  "novidades": [
-    "☁️ Backup na nuvem: ative em Ajustes → Backup dos dados. Seus dados são criptografados com uma senha que só você sabe, e o backup é feito sozinho uma vez por dia. Se trocar de celular, é só entrar com seu e-mail e recuperar tudo."
-  ]
+  "versao": 42,
+  "novidades": []
 }
