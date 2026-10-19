@@ -1,7 +1,6 @@
 {
-  "versao": 40,
+  "versao": 41,
   "novidades": [
-    "❓ Central de ajuda: as dúvidas mais comuns (trocar de celular, backup, Face ID, notificações) e um botão para falar com o suporte. Fica em Ajustes.",
-    "💬 Agora você pode deixar um depoimento sobre o Tino, também em Ajustes."
+    "☁️ Backup na nuvem: ative em Ajustes → Backup dos dados. Seus dados são criptografados com uma senha que só você sabe, e o backup é feito sozinho uma vez por dia. Se trocar de celular, é só entrar com seu e-mail e recuperar tudo."
   ]
 }

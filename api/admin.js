@@ -63,6 +63,7 @@ module.exports = async (req, res) => {
     if (acao === 'bloquear') {
       await redis('HDEL', 'codigos', codigo);
       await redis('HDEL', 'usos', codigo);
+      await redis('DEL', 'nuvem:' + codigo);
       return res.json({ ok: true });
     }
     res.status(400).json({ ok: false, erro: 'Ação desconhecida' });

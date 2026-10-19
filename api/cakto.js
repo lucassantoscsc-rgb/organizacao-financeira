@@ -30,6 +30,7 @@ module.exports = async (req, res) => {
     } else if (corpo.event === 'refund' || corpo.event === 'chargeback') {
       await redis('HDEL', 'codigos', email);
       await redis('HDEL', 'usos', email);
+      await redis('DEL', 'nuvem:' + email);   // backup na nuvem de quem foi reembolsado
     }
     res.status(200).json({ ok: true });
   } catch (e) {

@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 40;
+const APP_VERSAO = 41;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -692,6 +692,134 @@ function cardNotificacoes(){
     <div class="switch" style="margin-top:8px"><span>Aviso de contas <small class="muted">(na véspera do vencimento)</small></span><button class="tg ${n.contas?'on':''}" data-act="notif" data-tipo="contas" aria-label="Aviso de contas"></button></div>
     ${notifLigada() ? '<button class="btn sec" data-act="notifTeste" style="margin-top:10px">🔔 Enviar notificação de teste</button>' : ''}
     ${negado ? '<p class="note">As notificações estão bloqueadas para este app. Libere nos ajustes do celular.</p>' : '<p class="note">Para avisar das contas, o app envia só as datas de vencimento, sem nomes nem valores.</p>'}`}</section>`;
+}
+
+/* ---------- backup na nuvem ----------
+   Os dados são criptografados aqui no aparelho (AES-GCM com chave tirada de uma senha que só a
+   pessoa sabe, PBKDF2) e só o pacote ilegível vai para o servidor (api/nuvem.js).
+   A chave fica guardada neste aparelho, fora do estado S (para não ir parar no backup em arquivo),
+   e permite o envio automático uma vez por dia, só quando algo mudou. */
+const NUVEM_KEY = (c) => 'orgfin:nuvem:' + c;
+const lerNuvem = () => { if (!S.conta) return null; try { return JSON.parse(localStorage.getItem(NUVEM_KEY(S.conta))); } catch(e){ return null; } };
+const gravarNuvem = (cfg) => { try { cfg ? localStorage.setItem(NUVEM_KEY(S.conta), JSON.stringify(cfg)) : localStorage.removeItem(NUVEM_KEY(S.conta)); } catch(e){} };
+const paraB64 = (buf) => { const a = new Uint8Array(buf); let s = ''; for (let i = 0; i < a.length; i += 0x8000) s += String.fromCharCode.apply(null, a.subarray(i, i + 0x8000)); return btoa(s); };
+const apiNuvem = (dados) => fetch('api/nuvem', { method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), nome:nomeAparelho(), ...dados }) })
+  .then(r => r.json().catch(() => ({})).then(d => { if (!r.ok || !d.ok) { const e = new Error(d.erro || 'falha'); e.status = r.status; throw e; } return d; }));
+async function chaveDaSenha(senha, salt){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name:'PBKDF2', salt, iterations:250000, hash:'SHA-256' }, base, { name:'AES-GCM', length:256 }, true, ['encrypt','decrypt']);
+}
+async function gzip(bytes, desfazer){
+  const fluxo = new Blob([bytes]).stream().pipeThrough(desfazer ? new DecompressionStream('gzip') : new CompressionStream('gzip'));
+  return new Uint8Array(await new Response(fluxo).arrayBuffer());
+}
+// Assinatura do conteúdo, ignorando campos que mudam sozinhos, para só enviar quando algo mudou de verdade.
+const IGNORAR_NUVEM = ['verificadoEm','notifSync','versaoVista','ultimoBackup','novosDesdeBackup','backupAdiado','depo'];
+function assinaturaDados(){
+  const txt = JSON.stringify(S, (k, v) => IGNORAR_NUVEM.includes(k) ? undefined : v);
+  let h = 2166136261; for (let i = 0; i < txt.length; i++){ h ^= txt.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36) + txt.length;
+}
+async function enviarNuvem(cfg){
+  const chave = await crypto.subtle.importKey('jwk', cfg.chave, { name:'AES-GCM' }, false, ['encrypt']);
+  let bytes = new TextEncoder().encode(JSON.stringify({ ...S, backupEm: new Date().toISOString() }));
+  const z = !!window.CompressionStream; if (z) bytes = await gzip(bytes);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cifrado = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, chave, bytes);
+  const assinatura = assinaturaDados();
+  const r = await apiNuvem({ acao:'salvar', pacote:{ v:1, z, salt:cfg.salt, iv:paraB64(iv), dados:paraB64(cifrado) } });
+  gravarNuvem({ ...cfg, ultimo:r.em, assinatura });
+  S.ultimoBackup = r.em; S.novosDesdeBackup = 0; S.backupAdiado = null; salvar();
+  return r;
+}
+let nuvemEnviando = false;
+function backupAutomatico(){
+  if (DEMO || !S.liberado || !S.conta || !navigator.onLine || nuvemEnviando) return;
+  const cfg = lerNuvem(); if (!cfg) return;
+  if (cfg.ultimo && Date.now() - new Date(cfg.ultimo).getTime() < 20*3600e3) return;
+  if (cfg.assinatura === assinaturaDados()) return;
+  nuvemEnviando = true;
+  enviarNuvem(cfg).then(() => { if (aba === 'ajustes' && !ocupado()) render(); })
+    .catch(e => { if (e.status === 403) return; })   // sem acesso: a verificação de acesso cuida disso
+    .finally(() => { nuvemEnviando = false; });
+}
+const quandoNuvem = (iso) => { const d = new Date(iso); return diasDesde(iso) === 0 ? 'hoje às ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) : d.toLocaleDateString('pt-BR'); };
+function cardNuvem(){
+  if (DEMO || !S.conta) return '';
+  const cfg = lerNuvem();
+  return `<div class="nuvem"><h4>☁️ Backup na nuvem</h4>${cfg
+    ? `<p class="note" style="margin:0 0 12px"><span class="tag auto" style="margin:0 4px 0 0">ligado</span> Último envio: <b>${cfg.ultimo ? quandoNuvem(cfg.ultimo) : 'ainda não'}</b>. É feito sozinho uma vez por dia, quando você abre o app com internet e algo mudou.</p>
+       <button class="btn sec" data-act="nuvemAgora">☁️ Fazer backup na nuvem agora</button>
+       <button class="btn sec" data-act="nuvemRestaurar">Restaurar da nuvem</button>
+       <button class="link-sutil" data-act="nuvemDesligar">Desligar backup na nuvem</button>`
+    : `<p class="note" style="margin:0 0 12px">Guarde uma cópia automática e protegida por senha. Se trocar ou perder o celular, é só entrar com seu e-mail e recuperar tudo.</p>
+       <button class="btn pri" data-act="nuvemAtivar">☁️ Ativar backup na nuvem</button>
+       <button class="btn sec" data-act="nuvemRestaurar">Restaurar da nuvem</button>`}</div>`;
+}
+function abrirAtivarNuvem(){
+  if (!window.crypto || !crypto.subtle) return toast('Seu navegador não suporta o backup na nuvem. Atualize o sistema do celular.');
+  abrir(`<h2>☁️ Backup na nuvem</h2>
+    <p class="note" style="margin:0 0 12px">Crie uma senha para proteger seu backup. Seus dados são criptografados aqui no celular antes de sair dele: <b>nem a nossa equipe consegue ver</b>.</p>
+    <div class="f"><label>Senha do backup (mínimo 6 caracteres)</label><input id="nSenha" type="password" autocomplete="new-password"></div>
+    <div class="f"><label>Repita a senha</label><input id="nSenha2" type="password" autocomplete="new-password"></div>
+    <div class="alert warnbox" style="margin:0 0 14px"><span>⚠️</span><div><b>Anote essa senha em um lugar seguro.</b> Você vai precisar dela para recuperar seus dados em outro celular. Se esquecer, não temos como recuperar o backup.</div></div>
+    <button class="btn pri" data-act="nuvemConfirmar">Ativar e fazer o primeiro backup</button>`);
+}
+async function confirmarNuvem(btn){
+  const s1 = document.getElementById('nSenha').value, s2 = document.getElementById('nSenha2').value;
+  if (s1.length < 6) return toast('A senha precisa ter pelo menos 6 caracteres');
+  if (s1 !== s2) return toast('As senhas não são iguais');
+  btn.disabled = true; btn.textContent = 'Criptografando e enviando…';
+  try {
+    const info = await apiNuvem({ acao:'info' });
+    if (info.existe && !confirm(`Já existe um backup na nuvem de ${quandoNuvem(info.em)}${info.aparelho ? ' ('+info.aparelho+')' : ''}.\n\nAtivar aqui substitui esse backup pelos dados deste aparelho. Continuar?`)) { btn.disabled = false; btn.textContent = 'Ativar e fazer o primeiro backup'; return; }
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const chave = await chaveDaSenha(s1, salt);
+    const cfg = { salt:paraB64(salt), chave: await crypto.subtle.exportKey('jwk', chave) };
+    await enviarNuvem(cfg);
+    fechar(); render(); toast('Backup na nuvem ativado ✓');
+  } catch(e){
+    btn.disabled = false; btn.textContent = 'Ativar e fazer o primeiro backup';
+    toast(e.message === 'grande' ? 'Seus dados são grandes demais para a nuvem. Use o backup em arquivo.' : 'Não foi possível enviar. Confira a internet e tente de novo.');
+  }
+}
+async function abrirRestaurarNuvem(aoEntrar){
+  let info;
+  try { info = await apiNuvem({ acao:'info' }); } catch(e){ if (!aoEntrar) toast('Sem conexão com a nuvem. Confira a internet.'); return; }
+  if (!info.existe){ if (!aoEntrar) toast('Você ainda não tem backup na nuvem'); return; }
+  if (aoEntrar && ocupado()) return;
+  abrir(`<h2>☁️ ${aoEntrar ? 'Encontramos um backup seu' : 'Restaurar da nuvem'}</h2>
+    <p class="note" style="margin:0 0 12px">Backup de <b>${quandoNuvem(info.em)}</b>${info.aparelho ? ', feito em '+esc(info.aparelho) : ''}. Digite a senha do backup para recuperar seus dados neste aparelho.</p>
+    <div class="f"><label>Senha do backup</label><input id="nSenhaR" type="password" autocomplete="current-password"></div>
+    <button class="btn pri" data-act="nuvemRecuperar">Recuperar meus dados</button>
+    ${aoEntrar ? '<button class="btn sec" data-act="fechar">Começar do zero</button>' : ''}`);
+}
+async function recuperarNuvem(btn){
+  const senha = document.getElementById('nSenhaR').value;
+  if (!senha) return toast('Digite a senha do backup');
+  btn.disabled = true; btn.textContent = 'Recuperando…';
+  const volta = (msg) => { btn.disabled = false; btn.textContent = 'Recuperar meus dados'; toast(msg); };
+  let d, chave, p;
+  try { p = (await apiNuvem({ acao:'baixar' })).pacote; } catch(e){ return volta('Não foi possível baixar. Confira a internet.'); }
+  try {
+    chave = await chaveDaSenha(senha, deB64(p.salt));
+    let bytes = new Uint8Array(await crypto.subtle.decrypt({ name:'AES-GCM', iv:deB64(p.iv) }, chave, deB64(p.dados)));
+    if (p.z) bytes = await gzip(bytes, true);
+    d = JSON.parse(new TextDecoder().decode(bytes));
+    if (!d.meses || !d.perfil) throw 0;
+  } catch(e){ return volta('Senha incorreta'); }
+  const temDados = Object.keys(S.meses||{}).length && S.perfil.ok;
+  if (temDados && !confirm('Substituir os dados deste aparelho pelos do backup na nuvem?')) return volta('Nada foi alterado');
+  d.liberado = S.liberado || d.liberado; d.conta = S.conta || d.conta; d.verificadoEm = S.verificadoEm; delete d.backupEm;
+  S = d; aba = 'resumo'; migrar(); S.tourVisto = true; S.versaoVista = APP_VERSAO; S.novosDesdeBackup = 0;
+  gravarNuvem({ salt:p.salt, chave: await crypto.subtle.exportKey('jwk', chave), ultimo:new Date().toISOString(), assinatura:assinaturaDados() });
+  salvar(); fechar(); render(); toast('Dados recuperados da nuvem ✓');
+}
+async function desligarNuvem(){
+  if (!confirm('Desligar o backup na nuvem?\n\nA cópia guardada na nuvem será apagada. Seus dados neste aparelho continuam aqui.')) return;
+  try { await apiNuvem({ acao:'apagar' }); } catch(e){ return toast('Sem conexão. Tente de novo com internet.'); }
+  gravarNuvem(null); render(); toast('Backup na nuvem desligado');
 }
 
 /* ---------- central de ajuda ---------- */
@@ -1701,7 +1829,7 @@ function lembreteBackup(){
   if (DEMO || !precisaBackup()) return '';
   const quando = S.ultimoBackup ? `Seu último backup foi há ${diasDesde(S.ultimoBackup)} dia${diasDesde(S.ultimoBackup)===1?'':'s'}` : 'Você ainda não fez nenhum backup';
   return `<div class="alert info backup"><span>💾</span><div><b>Proteja seus dados</b><br>${quando} e tem ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} novo${S.novosDesdeBackup>1?'s':''}. Se trocar de celular ou limpar o navegador, eles se perdem.
-    <div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="adiarBackup">Depois</button></div></div></div>`;
+    ${S.conta && !lerNuvem() ? '<div class="acts"><button class="btn pri" data-act="nuvemAtivar">☁️ Backup automático</button><button class="btn sec" data-act="exportar">Em arquivo</button></div><button class="link-sutil" data-act="adiarBackup">Depois</button>' : '<div class="acts"><button class="btn pri" data-act="exportar">Fazer backup</button><button class="btn sec" data-act="adiarBackup">Depois</button></div>'}</div></div>`;
 }
 function alertasContas(){
   if (key(cur.y,cur.m) !== chaveHoje()) return '';
@@ -2212,7 +2340,8 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Último backup: <b>${S.ultimoBackup ? new Date(S.ultimoBackup).toLocaleDateString('pt-BR') + ` (${diasDesde(S.ultimoBackup)===0?'hoje':'há '+diasDesde(S.ultimoBackup)+' dias'})` : 'nunca'}</b>${S.novosDesdeBackup?` · ${S.novosDesdeBackup} lançamento${S.novosDesdeBackup>1?'s':''} desde então`:''}</p>
     <button class="btn sec" data-act="exportar">⬇️ Fazer backup</button>
     <button class="btn sec" data-act="importar">⬆️ Restaurar backup</button>
-    <input type="file" id="fileImp" hidden></section>
+    <input type="file" id="fileImp" hidden>
+    ${cardNuvem()}</section>
   
   <section class="card"><h3>Exportar para Excel</h3>
     <p class="note" style="margin:0 0 12px">Gera uma planilha com todos os lançamentos (data, descrição, categoria, valor, forma de pagamento) para abrir no Excel ou no Google Planilhas. Serve para analisar, não para restaurar.</p>
@@ -2457,7 +2586,16 @@ document.addEventListener('click', e=>{
     salvar(); render(); checarConquistas(); return;
   }
   const a = t.dataset.act;
+  if (a==='fechar'){ fechar(); return; }
   if (a==='ajuda'){ abrirAjuda(); return; }
+  if (a==='nuvemAtivar'){ abrirAtivarNuvem(); return; }
+  if (a==='nuvemConfirmar'){ confirmarNuvem(t); return; }
+  if (a==='nuvemRestaurar'){ abrirRestaurarNuvem(false); return; }
+  if (a==='nuvemRecuperar'){ recuperarNuvem(t); return; }
+  if (a==='nuvemDesligar'){ desligarNuvem(); return; }
+  if (a==='nuvemAgora'){ const cfg = lerNuvem(); if (!cfg) return; t.disabled = true; t.textContent = 'Enviando…';
+    enviarNuvem(cfg).then(() => { render(); toast('Backup na nuvem feito ✓'); })
+      .catch(e => { t.disabled = false; t.textContent = '☁️ Fazer backup na nuvem agora'; toast(e.message === 'grande' ? 'Seus dados são grandes demais para a nuvem. Use o backup em arquivo.' : 'Não foi possível enviar. Confira a internet.'); }); return; }
   if (a==='ajudaTour'){ fechar(); setTimeout(iniciarTour, 250); return; }
   if (a==='depoimento'){ abrirDepoimento(); return; }
   if (a==='depoNota'){ depoNota(+t.dataset.v); return; }
@@ -2678,6 +2816,8 @@ function entrarNaConta(c){
   else if (S.conta && S.conta !== id) S = novoEstado();
   S.liberado = true; S.conta = id; S.verificadoEm = new Date().toISOString(); migrar(); aba = 'resumo'; salvar(); render();
   if (guardado) toast('Bem-vindo de volta! Seus dados foram recuperados ✓');
+  // Aparelho novo, sem dados: se houver backup na nuvem, oferece recuperar.
+  else if (!Object.keys(S.meses).length) setTimeout(() => abrirRestaurarNuvem(true), 600);
 }
 function sairDaConta(){
   if (!confirm('Sair da conta neste aparelho?\n\nSeus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail.')) return;
@@ -2984,7 +3124,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
@@ -2993,6 +3133,7 @@ function iniciarApp(){
   mostrarNovidades();
   setTimeout(checarConquistas, 1200);
   setTimeout(talvezPedirDepoimento, 2500);
+  setTimeout(backupAutomatico, 4000);
 }
 if (DEMO){
   const salvo = S;   // mantém só preferências visuais do aparelho
@@ -3010,7 +3151,7 @@ if (S.liberado && S.perfil.ok && temSenha()){ aoDestravar = iniciarApp; travar()
 if (!DEMO) verificarAcesso();
 checarVersao(false);
 window.addEventListener('online', verificarAcesso);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') verificarAcesso(); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ verificarAcesso(); setTimeout(backupAutomatico, 3000); } });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
