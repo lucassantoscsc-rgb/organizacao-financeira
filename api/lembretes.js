@@ -1,6 +1,7 @@
 // Tarefa diária (Vercel Cron, ~20h de Brasília): envia os lembretes.
 // - "Anotou seus gastos de hoje?" para quem ativou e ainda não lançou nada hoje;
-// - "X contas vencem amanhã" para quem ativou o aviso de contas.
+// - "X contas vencem amanhã" para quem ativou o aviso de contas;
+// - aos domingos, um convite para ver o resumo da semana (só para quem ativou o lembrete diário).
 const webpush = require('web-push');
 const { redis } = require('./_db');
 
@@ -12,6 +13,7 @@ module.exports = async (req, res) => {
 
   const brasilia = (dias) => new Date(Date.now() - 3 * 3600e3 + dias * 864e5).toISOString().slice(0, 10);
   const hoje = brasilia(0), amanha = brasilia(1);
+  const domingo = new Date(hoje + 'T12:00:00Z').getUTCDay() === 0;
   const todos = (await redis('HGETALL', 'push')) || [];
   let enviados = 0, removidos = 0, jaAnotou = 0, falhas = 0;
   for (let i = 0; i < todos.length; i += 2) {
@@ -21,8 +23,9 @@ module.exports = async (req, res) => {
     const nContas = r.contas ? (r.vencimentos || {})[amanha] || 0 : 0;
     if (nContas) partes.push(nContas === 1 ? '⏰ 1 conta vence amanhã.' : `⏰ ${nContas} contas vencem amanhã.`);
     if (r.diario && r.ultimoDia !== hoje) partes.push('✍️ Anotou seus gastos de hoje? Leva 10 segundos.');
+    if (domingo && r.diario && !nContas) partes.push('📅 Sua semana fechou: veja quanto você gastou e onde.');
     if (!partes.length){ if (r.diario && r.ultimoDia === hoje) jaAnotou++; continue; }
-    const msg = { title: nContas ? 'Contas vencendo' : 'Tino Finanças', body: partes.join(' '), url: nContas ? './?aba=contas' : './?novo=1' };
+    const msg = { title: nContas ? 'Contas vencendo' : domingo ? 'Resumo da semana' : 'Tino Finanças', body: partes.join(' '), url: nContas ? './?aba=contas' : domingo && r.diario ? './?semana=1' : './?novo=1' };
     try { await webpush.sendNotification(r.sub, JSON.stringify(msg), { TTL: 6 * 3600 }); enviados++; }
     catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) { await redis('HDEL', 'push', id); removidos++; }   // inscrição expirada

@@ -1,4 +1,10 @@
 {
-  "versao": 43,
-  "novidades": []
+  "versao": 44,
+  "novidades": [
+    "🎨 Visual novo, com a cara do Tino: verde e dourado, letras novas e tela inicial mais limpa.",
+    "💚 \"Pode gastar hoje\": o número que importa logo no topo, com uma barra que mostra se seus gastos do dia a dia estão no ritmo do mês.",
+    "📋 Colar do banco: copie a notificação de compra ou o comprovante do Pix e o Tino lança sozinho. No Android, dá para usar o Compartilhar do app do banco.",
+    "🌊 Para onde foi seu dinheiro: veja o caminho do que entrou até cada categoria.",
+    "📅 Minha semana: seus gastos dos últimos 7 dias, dia a dia, comparados com a semana anterior."
+  ]
 }

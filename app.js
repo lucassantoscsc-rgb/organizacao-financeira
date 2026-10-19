@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 43;
+const APP_VERSAO = 44;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -822,6 +822,156 @@ async function desligarNuvem(){
   gravarNuvem(null); render(); toast('Backup na nuvem desligado');
 }
 
+/* ---------- tela inicial: o número principal ----------
+   No mês atual, o destaque é "Pode gastar hoje": o que sobra (já descontando as contas a pagar)
+   dividido pelos dias que faltam. A barra compara os gastos do dia a dia com o quanto do mês já passou:
+   contas fixas e faturas ficam de fora, porque costumam cair todas no começo do mês. */
+function heroResumo(C){
+  const neg = C.restante < 0;
+  if (key(cur.y,cur.m) !== chaveHoje()) return `<section class="card hero">
+    <div class="lbl">Restante para gastar</div>
+    <div class="big num ${neg && !S.ocultar?'neg':''}">${brl(C.restante)}</div>
+    <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas</div></section>`;
+  const D = diasNoMes(cur.y,cur.m), d = hoje.getDate(), rest = D - d + 1;
+  const livre = C.restante - C.contasPend, porDia = livre / rest;
+  const ritmo = C.gastosVista / d, fim = livre - ritmo * (rest - 1);
+  const base = livre + C.gastosVista;   // o que estava livre para o dia a dia neste mês
+  const usado = base > 0 ? Math.min(100, Math.max(0, C.gastosVista / base * 100)) : 0, passou = d / D * 100;
+  const st = C.entradas <= 0 ? null : livre < 0 ? ['ruim','⚠️ Mês no vermelho'] : usado <= passou + 5 ? ['ok','✅ No ritmo certo'] : usado <= passou + 20 ? ['atencao','👀 Um pouco acima do ritmo'] : ['ruim','⚠️ Gastando rápido'];
+  const fut = comprometidoFuturo();
+  return `<section class="card hero hero2">
+    <div class="h2-lbl"><span>Pode gastar hoje</span>${st ? `<span class="st ${st[0]}">${st[1]}</span>` : ''}</div>
+    <div class="big num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</div>
+    <div class="h2-sub num">${livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>
+    ${base > 0 ? `<div class="ritmo" role="img" aria-label="Gastos do dia a dia ${Math.round(usado)}% do disponível, mês ${Math.round(passou)}% concluído">
+      <div class="ritmo-t"><span class="ritmo-f ${st?st[0]:''}" style="width:${usado}%"></span><span class="ritmo-m" style="left:${passou}%"></span></div>
+      <div class="ritmo-l"><span>Gastos do dia a dia <b>${Math.round(usado)}%</b></span><span>Mês <b>${Math.round(passou)}%</b></span></div></div>` : ''}
+    <div class="rapidas">
+      <button data-act="possoComprar"><span>🤔</span>Posso comprar?</button>
+      <button data-act="colar"><span>📋</span>Colar do banco</button>
+      <button data-act="semana"><span>📅</span>Minha semana</button>
+    </div>
+    <details class="como"><summary>Como chegamos nesse número</summary>
+      <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas = <b>${brl(C.restante)}</b></div>
+      ${C.contasPend > 0 ? `<div class="eq num">− ${brl(C.contasPend)} de contas a pagar = <b>${brl(livre)}</b></div>` : ''}
+      <div class="eq num">÷ ${rest} dia${rest>1?'s':''} = <b>${brl(Math.max(porDia,0))} por dia</b></div>
+      <div class="eq num">No ritmo atual (${brl0(ritmo)}/dia), o mês termina com <b class="${fim<0 && !S.ocultar?'neg':''}">${brl(fim)}</b>.</div>
+      ${fut > 0 ? `<div class="eq num">💳 ${brl(fut)} em parcelas nos próximos meses.</div>` : ''}
+    </details>
+  </section>`;
+}
+
+/* ---------- para onde foi o dinheiro (fluxo) ----------
+   Da entrada do mês para as maiores categorias, o que foi guardado e o que sobrou. */
+const CORES_FLUXO = ['#0d9668','#e9a91b','#3b82f6','#e05a47','#8b5cf6','#94a3a0'];
+function cardFluxo(C){
+  if (!(C.entradas > 0) || !(C.consumo > 0)) return '';
+  const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
+  const nos = cats.slice(0,5).map(([c,v],i)=>({ nome:nomeCat(c), e:emojiCat(c), v, cor:CORES_FLUXO[i] }));
+  const outras = soma(cats.slice(5), x=>x[1]); if (outras > 0) nos.push({ nome:'Outras', e:'•••', v:outras, cor:CORES_FLUXO[5] });
+  if (C.reservas > 0) nos.push({ nome:'Guardado', e:'🐷', v:C.reservas, cor:'#14b8a6' });
+  const sobra = C.entradas - C.consumo - C.reservas;
+  if (sobra > 0) nos.push({ nome:'Sobrou', e:'✨', v:sobra, cor:'#c7d6cf', sobra:true });
+  const tot = soma(nos, n=>n.v), W = 340, X1 = 14, X2 = 176, GAP = 8, MIN = 30;
+  const alt = nos.map(n => Math.max(n.v / tot * 260, MIN)), H = soma(alt, a=>a) + GAP * (nos.length - 1);
+  const esq = Math.min(1, C.entradas / tot) * H;
+  let y = 0, ye = (H - esq) / 2, rib = '', bar = '', lab = '';
+  nos.forEach((n, i) => {
+    const h = alt[i], he = n.v / tot * esq;
+    rib += `<path d="M${X1},${ye} C${(X1+X2)/2},${ye} ${(X1+X2)/2},${y} ${X2},${y} L${X2},${y+h} C${(X1+X2)/2},${y+h} ${(X1+X2)/2},${ye+he} ${X1},${ye+he} Z" fill="${n.cor}" opacity="${n.sobra?.45:.32}"/>`;
+    bar += `<rect x="${X2}" y="${y}" width="8" height="${h}" rx="3" fill="${n.cor}"/>`;
+    lab += `<text x="${X2+14}" y="${y+h/2-1}" class="fx-n">${esc(n.nome)}</text><text x="${X2+14}" y="${y+h/2+13}" class="fx-v">${S.ocultar?OCULTO:brl0(n.v)} · ${Math.round(n.v/C.entradas*100)}%</text>`;
+    y += h + GAP; ye += he;
+  });
+  return `<section class="card"><h3>Para onde foi seu dinheiro <small>${MESES[cur.m]}</small></h3>
+    <svg class="fluxo" viewBox="0 0 ${W} ${H+4}" role="img" aria-label="Fluxo das entradas para as categorias de gasto">
+      <rect x="0" y="${(H-esq)/2}" width="${X1}" height="${esq}" rx="4" fill="var(--teal)"/>${rib}${bar}${lab}</svg>
+    <div class="note">Entradas do mês: <b class="num">${brl(C.entradas)}</b>. ${sobra < 0 ? `Os gastos e reservas passaram ${brl(-sobra)} das entradas (inclui compras no crédito que ainda vão para a fatura).` : 'Porcentagens sobre as entradas do mês.'}</div></section>`;
+}
+
+/* ---------- minha semana ----------
+   Últimos 7 dias contra os 7 anteriores: gastos do dia a dia (sem parceladas e sem contas fixas). */
+function dadosSemana(fimOffset){
+  const dias = [];
+  for (let i = 6; i >= 0; i--){ const d = new Date(hoje); d.setDate(d.getDate() - i - fimOffset); dias.push(key(d.getFullYear(), d.getMonth()) + '-' + String(d.getDate()).padStart(2,'0')); }
+  const porDia = Object.fromEntries(dias.map(d=>[d,0])), cats = {}; let maior = null;
+  Object.values(S.meses).forEach(M => M.gastos.forEach(g => {
+    if (ehParcelado(g) || !(g.data in porDia)) return;
+    const v = +g.valor || 0; porDia[g.data] += v; cats[g.cat] = (cats[g.cat]||0) + v;
+    if (!maior || v > maior.valor) maior = g;
+  }));
+  return { dias, porDia, cats, maior, total: soma(Object.values(porDia), v=>v), semGasto: dias.filter(d=>!porDia[d]).length };
+}
+function abrirSemana(){
+  const a = dadosSemana(0), b = dadosSemana(7), max = Math.max(...Object.values(a.porDia), 1);
+  const dif = b.total > 0 ? Math.round((a.total / b.total - 1) * 100) : null;
+  const top = Object.entries(a.cats).sort((x,y)=>y[1]-x[1]).slice(0,3);
+  const ini = (d) => DIAS_SEMANA[new Date(d+'T12:00:00').getDay()].slice(0,3);
+  S.semanaVista = dataHoje(); salvar();
+  abrir(`<h2>📅 Minha semana</h2>
+    <div class="sem-total"><span>Gastos dos últimos 7 dias</span><b class="num">${brl(a.total)}</b>
+      ${dif === null ? '' : `<small class="${dif<=0?'up':'down'}">${dif<=0?'▼':'▲'} ${Math.abs(dif)}% vs. 7 dias anteriores (${brl0(b.total)})</small>`}</div>
+    <div class="sem-barras" role="img" aria-label="Gastos por dia">${a.dias.map(d=>`<div class="sb"><span class="sb-v num">${a.porDia[d] ? (S.ocultar?'•':brl0(a.porDia[d]).replace('R$ ','')) : ''}</span><span class="sb-b" style="height:${Math.max(a.porDia[d]/max*100, a.porDia[d]?6:2)}%"></span><span class="sb-d">${ini(d)}</span></div>`).join('')}</div>
+    <div class="sem-fatos">
+      <div><span>🗓️</span><b>${a.semGasto}</b> dia${a.semGasto===1?'':'s'} sem gastar</div>
+      ${a.maior ? `<div><span>🔝</span>Maior gasto: <b>${esc(a.maior.desc || nomeCat(a.maior.cat))}</b> ${brl(a.maior.valor)}</div>` : ''}
+    </div>
+    ${top.length ? `<h3 class="ajuda-t">Onde mais gastou</h3><div class="list flat">${top.map(([c,v])=>`<div class="item"><div class="ic">${emojiCat(c)}</div><div class="tx"><div class="t1">${esc(nomeCat(c))}</div></div><div class="val num">${brl(v)}</div></div>`).join('')}</div>` : '<div class="empty"><div class="e">🌱</div>Nenhum gasto nos últimos 7 dias.</div>'}
+    <p class="note">Parceladas e contas fixas ficam de fora: aqui é o seu dia a dia.</p>`);
+}
+function cardSemana(){
+  const dow = hoje.getDay();
+  if (DEMO || key(cur.y,cur.m) !== chaveHoje() || !(dow === 0 || dow === 1) || S.semanaVista === dataHoje() || (S.semanaVista && diasDesde(S.semanaVista) < 2)) return '';
+  const a = dadosSemana(0); if (!a.total) return '';
+  return `<button class="alert info semana-card" data-act="semana"><span>📅</span><div><b>Sua semana fechou</b><br>Você gastou <b class="num">${brl(a.total)}</b> nos últimos 7 dias. Toque para ver o resumo.</div></button>`;
+}
+
+/* ---------- colar do banco ----------
+   Lê o texto de uma notificação de compra ou de um comprovante de Pix e lança sozinho.
+   Tudo acontece no aparelho. Também recebe o "Compartilhar" do Android (share_target no manifest). */
+function interpretarTextoBanco(bruto){
+  const t = String(bruto || '').replace(/\s+/g, ' ').trim();
+  const mv = t.match(/R\$\s?(\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2}|\d+)/i);
+  if (!mv) return null;
+  const valor = parseFloat(/,/.test(mv[1]) ? mv[1].replace(/\./g,'').replace(',','.') : mv[1]);
+  if (!(valor > 0)) return null;
+  const n = semAcento(t).toLowerCase();
+  const entrada = /(recebid|voce recebeu|recebeu um|transferencia recebida|deposito recebido|credito em conta|caiu na sua conta|estorno|reembolso)/.test(n) && !/(compra|enviad|voce pagou|pagamento efetuado|pagamento realizado)/.test(n);
+  const forma = /debito/.test(n) ? 'débito' : /\bpix\b/.test(n) ? 'pix' : /(credito|cartao|compra aprovada|compra de|compra no)/.test(n) ? 'crédito' : '';
+  const corta = (s) => s.split(/\s(?:para o cart|com o cart|no cart|cart[aã]o|final\s\d|em \d{2}\/|em \d+\s?x|\d+\s?x\b|às|as \d|no valor|aprovad|foi |realizad)|[,.;!:]|\s-\s/i)[0].replace(/\*.*$/,'').trim();
+  let quem = '', m;
+  if (!entrada && (m = t.match(/\s-\s([A-Za-zÀ-ú][\wÀ-ú &'*.-]{2,30})\s*$/))) quem = corta(m[1]);   // "... às 14:32 - DROGASIL"
+  else if (entrada){ if ((m = t.match(/\b(?:de|por)\s+([A-ZÀ-Úa-zà-ú][^\d,.;]{2,40})/))) quem = corta(m[1]); }
+  else if ((m = t.match(/\b(?:em|no estabelecimento|na loja)\s+([A-Za-zÀ-ú0-9*&'][^,;]{2,45})/i)) && !/^\d/.test(m[1])) quem = corta(m[1]);
+  else if ((m = t.match(/\bpara\s+([A-ZÀ-Úa-zà-ú][^\d,.;]{2,40})/))) quem = corta(m[1]);
+  else {   // notificações que começam pela loja: "Uber *trip R$ 18,40 no cartão"
+    const antes = corta(t.slice(0, t.search(/R\$/i)).replace(/^[\wÀ-ú]+:\s*/, '')).replace(/\b(compra|aprovada|pagamento|valor|de|no|na|em)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+    if (/^[A-Za-zÀ-ú][\wÀ-ú &'-]{1,29}$/.test(antes)) quem = antes;
+  }
+  quem = quem.replace(/\b(o|a|seu|sua)\b\s*$/i,'').trim().slice(0, 30);
+  if (quem && quem === quem.toUpperCase()) quem = quem.toLowerCase().replace(/(^|\s)\S/g, x => x.toUpperCase());
+  const vs = valor.toFixed(2).replace('.', ',');
+  const parc = !entrada && (m = n.match(/\b(?:em\s)?(\d{1,2})\s?x\b/)) && +m[1] > 1 ? ` em ${+m[1]}x` : '';
+  // data da compra ("em 12/10"), só se for deste mês
+  let dia = ''; if ((m = t.match(/\b(\d{1,2})\/(\d{1,2})\b/)) && +m[2] === hoje.getMonth() + 1 && +m[1] <= hoje.getDate()) dia = ` dia ${+m[1]}`;
+  const frase = entrada ? `recebi ${vs}${quem ? ' de ' + quem : ''}${dia}` : `gastei ${vs}${quem ? ' ' + quem : ''}${parc}${forma ? ' no ' + forma : ''}${dia}`;
+  return { frase, entrada };
+}
+function lancarTexto(txt){
+  const r = interpretarTextoBanco(txt);
+  if (!r) return toast('Não encontrei um valor (R$) nesse texto');
+  fechar(); abrirForm('gastos');
+  setTimeout(() => { const i = document.getElementById('fFrase'); if (i){ i.value = r.frase; i.dataset.aplicado = r.frase; } aplicarFrase(r.frase); }, 80);
+}
+function abrirColar(){
+  abrir(`<h2>📋 Colar do banco</h2>
+    <p class="note" style="margin:0 0 12px">Copie a notificação de compra ou o comprovante do Pix no app do seu banco e cole aqui. O Tino entende o valor, o lugar e a forma de pagamento, e você só confere.</p>
+    <div class="f"><textarea id="cTexto" rows="4" placeholder="Ex.: Compra aprovada de R$ 45,90 em IFOOD no cartão final 1234"></textarea></div>
+    ${navigator.clipboard && navigator.clipboard.readText ? '<button class="btn sec" data-act="colarLer">📋 Colar o que eu copiei</button>' : ''}
+    <button class="btn pri" data-act="colarLancar">Lançar</button>
+    <p class="note" style="text-align:center;margin-top:10px">🔒 O texto é lido só aqui no seu celular.${/android/i.test(navigator.userAgent) ? ' Dica: no app do banco, use <b>Compartilhar → Tino</b>.' : ''}</p>`);
+}
+
 /* ---------- lista de espera: Tino Conectado ----------
    Valida o interesse num plano futuro com Open Finance antes de construir.
    Mostra um card no Resumo até a pessoa entrar na lista ou dispensar; também fica em Ajustes. */
@@ -1206,21 +1356,21 @@ function cardRetro(){
    "gastei 45 no ifood no crédito", "recebi 3500 de salário", "guardei 200 na viagem", "mercado 230 em 3x ontem".
    Funciona offline, por palavras-chave + o histórico de descrições do próprio usuário. */
 const PALAVRAS_CAT = [
-  ['🧺 Mercado', ['mercado','supermercado','feira','atacadao','assai','carrefour','hortifruti','sacolao','acougue','atacarejo','compras do mes']],
-  ['🍗 Alimentação', ['ifood','i food','rappi','restaurante','lanche','lanchonete','pizza','pizzaria','hamburguer','hamburgueria','almoco','jantar','padaria','cafe','sorvete','acai','delivery','marmita','mcdonalds','mc donalds','burger king','comida','salgado','churrasco','sushi']],
-  ['⛽ Gasolina', ['gasolina','posto','combustivel','etanol','abasteci','abastecer','diesel']],
-  ['🚗 Transporte', ['uber','99 pop','onibus','metro','passagem','estacionamento','pedagio','taxi','trem','bilhete unico','oficina','mecanico','lava jato','ipva','seguro do carro','licenciamento']],
-  ['🏠 Casa', ['aluguel','condominio','movel','moveis','reforma','material de construcao','produtos de limpeza','decoracao','iptu','eletrodomestico']],
-  ['💊 Saúde', ['farmacia','remedio','remedios','medico','consulta','dentista','exame','exames','plano de saude','hospital','academia','terapia','psicologo','drogaria','smart fit','smartfit','bluefit','selfit','bodytech','gympass','wellhub','totalpass','pague menos','raia','drogasil','panvel']],
-  ['📦 Compras Online', ['amazon','shopee','mercado livre','shein','aliexpress','magalu','temu','compra online','compras online']],
-  ['👕 Vestuário', ['roupa','roupas','tenis','sapato','sapatos','camisa','camiseta','calca','vestido','blusa','bermuda','renner','riachuelo','zara','sandalia','chinelo']],
-  ['🎉 Lazer', ['cinema','show','bar','cerveja','festa','viagem','passeio','balada','ingresso','ingressos','parque','praia','hotel','pousada','boliche','jogo']],
-  ['📚 Educação', ['curso','faculdade','escola','livro','livros','mensalidade da escola','material escolar','apostila','udemy']],
-  ['📱 Assinaturas', ['netflix','spotify','assinatura','prime video','amazon prime','disney','hbo','youtube premium','icloud','globoplay','deezer','chatgpt','streaming']],
-  ['💄 Beleza', ['salao','cabelo','manicure','unha','unhas','maquiagem','barbearia','barbeiro','cosmetico','cosmeticos','perfume','skincare','depilacao','sobrancelha']],
-  ['🐾 Pets', ['pet','racao','veterinario','petshop','pet shop','cachorro','gato','banho e tosa']],
+  ['🧺 Mercado', ['mercado','supermercado','feira','atacadao','assai','carrefour','hortifruti','sacolao','acougue','atacarejo','compras do mes','pao de acucar','guanabara','sonda','savegnago','zaffari','angeloni','bh supermercados','dia supermercado','oxxo','st marche','mambo','tenda','fort atacadista','makro','sams club','giassi','condor','muffato','prezunic','mundial','supernosso','comper']],
+  ['🍗 Alimentação', ['ifood','i food','rappi','restaurante','lanche','lanchonete','pizza','pizzaria','hamburguer','hamburgueria','almoco','jantar','padaria','cafe','sorvete','acai','delivery','marmita','mcdonalds','mc donalds','burger king','comida','salgado','churrasco','sushi','ze delivery','zedelivery','habibs','bobs','subway','outback','starbucks','kfc','giraffas','spoleto','coco bambu','madero','china in box','domino','dominos','pizza hut','cacau show','kopenhagen','chiquinho','aiqfome','99food','keeta']],
+  ['⛽ Gasolina', ['gasolina','posto','combustivel','etanol','abasteci','abastecer','diesel','shell','ipiranga','petrobras','br mania','ale combustiveis','raizen']],
+  ['🚗 Transporte', ['uber','99 pop','onibus','metro','passagem','estacionamento','pedagio','taxi','trem','bilhete unico','oficina','mecanico','lava jato','ipva','seguro do carro','licenciamento','99app','99 taxi','cabify','indrive','sem parar','conectcar','veloe','zul digital','estapar','blablacar','latam','gol linhas','azul linhas','buser','clickbus']],
+  ['🏠 Casa', ['aluguel','condominio','movel','moveis','reforma','material de construcao','produtos de limpeza','decoracao','iptu','eletrodomestico','leroy merlin','telhanorte','tok stok','tokstok','etna','camicado','casas bahia','ponto frio','madeiramadeira','mobly','havan']],
+  ['💊 Saúde', ['farmacia','remedio','remedios','medico','consulta','dentista','exame','exames','plano de saude','hospital','academia','terapia','psicologo','drogaria','smart fit','smartfit','bluefit','selfit','bodytech','gympass','wellhub','totalpass','pague menos','raia','drogasil','panvel','drogaria sao paulo','pacheco','nissei','venancio','ultrafarma','drogarias','unimed','amil','hapvida','sulamerica','bradesco saude','dasa','fleury','lavoisier','sabin','hermes pardini']],
+  ['📦 Compras Online', ['amazon','shopee','mercado livre','shein','aliexpress','magalu','temu','compra online','compras online','magazine luiza','americanas','submarino','casas bahia online','kabum','pichau','netshoes','dafiti','olist','elo7','tiktok shop','shopee pay']],
+  ['👕 Vestuário', ['roupa','roupas','tenis','sapato','sapatos','camisa','camiseta','calca','vestido','blusa','bermuda','renner','riachuelo','zara','sandalia','chinelo','c&a','cea','hering','marisa','pernambucanas','centauro','decathlon','nike','adidas','arezzo','youcom','farm','lojas renner']],
+  ['🎉 Lazer', ['cinema','show','bar','cerveja','festa','viagem','passeio','balada','ingresso','ingressos','parque','praia','hotel','pousada','boliche','jogo','ingresso.com','sympla','eventim','ticketmaster','cinemark','cinepolis','uci','kinoplex','booking','airbnb','decolar','hurb','123milhas','steam','playstation','xbox','nintendo','psn']],
+  ['📚 Educação', ['curso','faculdade','escola','livro','livros','mensalidade da escola','material escolar','apostila','udemy','alura','coursera','hotmart','kiwify','eduzz','duolingo','descomplica','estrategia concursos','kalunga']],
+  ['📱 Assinaturas', ['netflix','spotify','assinatura','prime video','amazon prime','disney','hbo','youtube premium','icloud','globoplay','deezer','chatgpt','streaming','hbo max','paramount','apple tv','star plus','crunchyroll','youtube music','google one','microsoft 365','canva','adobe','claude','gemini','tidal','audible','kindle unlimited','ifood clube','amazon music']],
+  ['💄 Beleza', ['salao','cabelo','manicure','unha','unhas','maquiagem','barbearia','barbeiro','cosmetico','cosmeticos','perfume','skincare','depilacao','sobrancelha','boticario','o boticario','natura','sephora','eudora','quem disse berenice','mac cosmeticos','avon','beleza na web']],
+  ['🐾 Pets', ['pet','racao','veterinario','petshop','pet shop','cachorro','gato','banho e tosa','petz','cobasi','petlove','dogsmart']],
   ['🎁 Presentes', ['presente','presentes','lembrancinha','aniversario']],
-  ['🧾 Contas', ['conta de luz','luz','energia','conta de agua','agua','internet','telefone','conta do celular','recarga','gas','boleto','conta']],
+  ['🧾 Contas', ['conta de luz','luz','energia','conta de agua','agua','internet','telefone','conta do celular','recarga','gas','boleto','conta','vivo','claro','tim','oi fibra','sky','net','enel','light','cemig','copel','coelba','celpe','cpfl','equatorial','energisa','sabesp','copasa','cedae','embasa','sanepar','comgas','naturgy']],
   ['🧾 Parcela', ['parcela','emprestimo','financiamento','consorcio','prestacao']],
 ];
 const VERBOS_ENTRADA = ['recebi','ganhei','salario','caiu','entrou','vendi','renda','freela','reembolso','pagaram','me pagaram','comissao','bonus','decimo terceiro'];
@@ -1624,13 +1774,7 @@ function telaResumo(){
   const C = calc(cur.y,cur.m), P = C.P;
   const prox = nextYM(cur.y,cur.m);
   const neg = C.restante < 0;
-  let html = `
-  <section class="card hero">
-    <div class="lbl">Restante para gastar</div>
-    <div class="big num ${neg && !S.ocultar?'neg':''}">${brl(C.restante)}</div>
-    <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas</div>
-    ${blocoPrevisao(C)}
-  </section>`;
+  let html = heroResumo(C) + cardSemana();
 
   html += cardTagAtiva();
   html += cardRetro();
@@ -1640,11 +1784,11 @@ function telaResumo(){
   html += alertasContas();
   html += alertasOrcamento(C);
 
-  html += `<div class="grid">
-    ${stat('Entradas','#0f9f6e',C.entradas, variacao(C.entradas, P&&P.entradas, false))}
-    ${stat('Saídas','#d64045',C.saidas, variacao(C.saidas, P&&P.saidas, true))}
+  const grade = `<div class="grid">
+    ${stat('Entradas','#0d9668',C.entradas, variacao(C.entradas, P&&P.entradas, false))}
+    ${stat('Saídas','#dc4545',C.saidas, variacao(C.saidas, P&&P.saidas, true))}
     ${stat('Reservas & invest.','#14b8a6',C.reservas, variacao(C.reservas, P&&P.reservas, false))}
-    ${stat('Uso do crédito','#b7791f',C.credito, variacao(C.credito, P&&P.credito, true))}
+    ${stat('Uso do crédito','#e9a91b',C.credito, variacao(C.credito, P&&P.credito, true))}
   </div>`;
   if (C.credito > 0) html += `<div class="alert"><span>💳</span><div><b>${brl(C.credito)} no crédito</b> ainda não saiu do seu saldo. Esse valor entra nas saídas quando a fatura vencer${(S.cartoes||[]).length?'':` (em ${MESES[prox.m]})`}.</div></div>`;
   if (C.faturaAnterior > 0){ const fs = faturasPorCartao(cur.y,cur.m);
@@ -1652,6 +1796,8 @@ function telaResumo(){
 
   html += cardDicas();
   html += cardCategorias(C);
+  html += cardFluxo(C);
+  html += grade;
   html += cardOrcamentos(C);
   html += cardAssinaturas();
   html += cardEvolucao();
@@ -1885,19 +2031,22 @@ function alertasOrcamento(C){
 }
 
 // Gráfico: onde o dinheiro foi (barras horizontais ordenadas, um toque abre o detalhe).
+let catsAbertas = false;
 function cardCategorias(C){
   const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   let h = `<section class="card" id="cardCategorias"><h3>Onde você gastou <small>${brl(C.consumo)}</small></h3>`;
   if (!cats.length) return h + `<div class="note">Seus gastos por categoria aparecem aqui.</div></section>`;
   const max = cats[0][1];
   h += `<div class="hbars" role="list">`;
-  cats.forEach(([c,v])=>{
+  const mostrar = catsAbertas ? cats : cats.slice(0, 6);
+  mostrar.forEach(([c,v])=>{
     h += `<button class="hb" role="listitem" data-cat="${esc(c)}" aria-label="${esc(nomeCat(c))}: ${brl(v)}, ${(v/C.consumo*100).toFixed(0)}% do total">
       <span class="hb-l"><span class="hb-e">${emojiCat(c)}</span>${esc(nomeCat(c))}</span>
       <span class="hb-v num">${brl(v)} <small>${(v/C.consumo*100).toFixed(0)}%</small></span>
       <span class="hb-t"><span style="width:${Math.max(v/max*100,1.5)}%"></span></span></button>`;
   });
   h += `</div>`;
+  if (cats.length > 6) h += `<button class="ver-mais" data-act="catsToggle">${catsAbertas ? 'Mostrar menos' : `Ver todas as ${cats.length} categorias`}</button>`;
   h += `<div class="ess"><span><i class="dot ok"></i>Essenciais ${brl(C.essenciais)}</span><span><i class="dot no"></i>Não essenciais ${brl(C.consumo-C.essenciais)}</span></div>`;
   h += `<div class="note">Toque numa categoria para ver o histórico e os lançamentos. Compras no crédito contam no mês da compra (parceladas, no mês de cada parcela).</div></section>`;
   return h;
@@ -2626,6 +2775,11 @@ document.addEventListener('click', e=>{
   }
   const a = t.dataset.act;
   if (a==='fechar'){ fechar(); return; }
+  if (a==='colar'){ abrirColar(); return; }
+  if (a==='colarLancar'){ lancarTexto(document.getElementById('cTexto').value); return; }
+  if (a==='colarLer'){ navigator.clipboard.readText().then(x => { document.getElementById('cTexto').value = x; if (interpretarTextoBanco(x)) lancarTexto(x); else toast('Não encontrei um valor (R$) no que você copiou'); }).catch(() => toast('Não consegui ler. Toque no campo e use Colar.')); return; }
+  if (a==='semana'){ abrirSemana(); return; }
+  if (a==='catsToggle'){ catsAbertas = !catsAbertas; render(); return; }
   if (a==='ajuda'){ abrirAjuda(); return; }
   if (a==='listaAbrir'){ abrirLista(); return; }
   if (a==='listaDispensar'){ S.listaDispensada = new Date().toISOString(); salvar(); render(); toast('Tudo bem! Se mudar de ideia, está em Ajustes.'); return; }
@@ -3108,7 +3262,7 @@ function renderAcesso(){
 
 // Atalhos vindos da notificação.
 const parametros = new URLSearchParams(location.search);
-if (parametros.has('aba') || parametros.has('novo')) history.replaceState(null, '', location.pathname);
+if (['aba','novo','semana','colar','texto','titulo','link'].some(k => parametros.has(k))) history.replaceState(null, '', location.pathname + (DEMO ? location.search.replace(/[?&](aba|novo|semana|colar|texto|titulo|link)=[^&]*/g,'') : ''));
 if (parametros.get('aba') === 'contas') aba = 'contas';
 /* ---------- dados da demonstração ---------- */
 function dadosDemo(){
@@ -3172,6 +3326,12 @@ const BLOQ_DEMO = new Set(['listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgo
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
+  // Atalhos: notificação de domingo (?semana), atalho do ícone (?colar) e "Compartilhar → Tino" no Android (?texto=...)
+  if (S.liberado && S.perfil.ok){
+    if (parametros.has('semana')) setTimeout(abrirSemana, 300);
+    else if (parametros.has('texto') || parametros.has('titulo')){ const txt = [parametros.get('titulo'), parametros.get('texto')].filter(Boolean).join(' '); setTimeout(() => interpretarTextoBanco(txt) ? lancarTexto(txt) : (abrirColar(), setTimeout(()=>{ const c = document.getElementById('cTexto'); if (c) c.value = txt; }, 50)), 300); }
+    else if (parametros.has('colar')) setTimeout(abrirColar, 300);
+  }
   if (notifLigada() && S.notifSync !== dataHoje()){ S.notifSync = dataHoje(); salvar(); sincronizarNotif(); }
   if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
   mostrarNovidades();

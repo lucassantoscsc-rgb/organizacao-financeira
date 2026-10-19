@@ -1,6 +1,6 @@
 // Service worker: deixa o app funcionando offline.
 // Sempre que publicar uma nova versão, aumente o número abaixo.
-const CACHE = 'financas-v43';
+const CACHE = 'financas-v44';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -8,7 +8,10 @@ const ARQUIVOS = [
   './manifest.webmanifest',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './icons/apple-touch-icon.png'
+  './icons/apple-touch-icon.png',
+  './fonts/inter-var.woff2',
+  './fonts/poppins-700.woff2',
+  './fonts/poppins-800.woff2'
 ];
 
 self.addEventListener('install', (e) => {
