@@ -1,10 +1,11 @@
 /* =========================================================
-   Organização Financeira — app PWA
+   Tino Finanças — app PWA
    Todos os dados ficam salvos no próprio aparelho (localStorage).
    ========================================================= */
 
 const CONFIG = {
-  nomeApp: 'Organização Financeira',
+  nomeApp: 'Tino Finanças',
+  slogan: 'Tenha tino para o seu dinheiro.',
   // true = pede o e-mail da compra (ou código) na primeira abertura.
   // A conferência é feita no servidor (api/liberar.js).
   exigirCodigo: true,
@@ -20,7 +21,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 36;
+const APP_VERSAO = 37;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -2097,7 +2098,7 @@ function cardInstalar(){
     'ios-outro': ['iPhone (outros navegadores)', ['Copie o link do app e abra no <b>Safari</b>.', 'Depois siga as instruções do Safari: <b>Compartilhar</b> → <b>Adicionar à Tela de Início</b>.']],
     'android': ['Android (Chrome)', ['Toque no botão <b>Instalar app</b> acima, se aparecer.', 'Ou toque no menu <span class="kbd">⋮</span> no canto de cima.', 'Toque em <b>Instalar app</b> ou <b>Adicionar à tela inicial</b>.']],
     'samsung': ['Samsung Internet', ['Toque no menu <span class="kbd">☰</span> na barra de baixo.', 'Toque em <b>Adicionar página a</b> e depois em <b>Tela inicial</b>.']],
-    'pc': ['Computador (Chrome ou Edge)', ['Clique no ícone de <b>instalar</b> <span class="kbd">⊕</span> no fim da barra de endereço.', 'Ou abra o menu do navegador e clique em <b>Instalar Organização Financeira</b>.']]
+    'pc': ['Computador (Chrome ou Edge)', ['Clique no ícone de <b>instalar</b> <span class="kbd">⊕</span> no fim da barra de endereço.', 'Ou abra o menu do navegador e clique em <b>Instalar Tino Finanças</b>.']]
   };
   const lista = (k) => `<ol class="passos">${passos[k][1].map(p=>`<li>${p}</li>`).join('')}</ol>`;
   const outros = ['ios-safari','ios-chrome','android','samsung','pc'].filter(k=>k!==atual);
@@ -2609,7 +2610,7 @@ function entregarArquivo(nome, dados, tipo, titulo, aoConcluir){
 }
 function fazerBackup(){
   const dados = JSON.stringify({ ...S, backupEm: new Date().toISOString() }, null, 2);
-  entregarArquivo('backup-financas-'+dataHoje()+'.json', dados, 'application/json', 'Backup Organização Financeira',
+  entregarArquivo('backup-financas-'+dataHoje()+'.json', dados, 'application/json', 'Backup Tino Finanças',
     () => { S.ultimoBackup = new Date().toISOString(); S.novosDesdeBackup = 0; S.backupAdiado = null; salvar(); render(); toast('Backup feito ✓'); checarConquistas(); });
 }
 // Planilha (CSV no padrão brasileiro: ; entre colunas, vírgula decimal, BOM para o Excel reconhecer acentos).
@@ -2636,7 +2637,7 @@ function exportarCsv(){
   const cel = (v) => { v = String(v??''); return /[;"\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
   const cab = ['Data','Mês','Tipo','Descrição','Categoria','Forma de pagamento','Parcela','Valor (R$)','Essencial','Observação'];
   const csv = '\ufeff' + [cab, ...linhas].map(l=>l.map(cel).join(';')).join('\r\n');
-  entregarArquivo('lancamentos-financas-'+dataHoje()+'.csv', csv, 'text/csv', 'Lançamentos Organização Financeira', () => toast('Planilha exportada ✓'));
+  entregarArquivo('lancamentos-financas-'+dataHoje()+'.csv', csv, 'text/csv', 'Lançamentos Tino Finanças', () => toast('Planilha exportada ✓'));
 }
 
 // Campos de dinheiro: os centavos entram sozinhos enquanto digita (4 → 0,04 → 0,45 → 4,59 → 45,90), como nos apps de banco.
@@ -2817,6 +2818,7 @@ function renderAcesso(){
   $app.innerHTML = `<div class="onb"><div class="in">
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>${esc(CONFIG.nomeApp)}</h1>
+    <p class="slogan">${esc(CONFIG.slogan)}</p>
     ${iosNavegador ? `<div class="dica-ios"><b>📲 Instale antes de entrar</b>
       <ol><li>Toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> ${/CriOS/.test(navigator.userAgent)?'ao lado do endereço':'na barra de baixo'}.</li>
       <li>Toque em <b>Adicionar à Tela de Início</b>.</li>

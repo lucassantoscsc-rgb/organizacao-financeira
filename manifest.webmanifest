@@ -1,6 +1,6 @@
 {
-  "name": "Organização Financeira",
-  "short_name": "Finanças",
+  "name": "Tino Finanças",
+  "short_name": "Tino",
   "description": "Organize entradas, gastos, contas, reservas e metas mês a mês.",
   "start_url": "./index.html",
   "scope": "./",

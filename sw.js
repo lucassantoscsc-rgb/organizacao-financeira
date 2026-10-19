@@ -1,6 +1,6 @@
 // Service worker: deixa o app funcionando offline.
 // Sempre que publicar uma nova versão, aumente o número abaixo.
-const CACHE = 'financas-v36';
+const CACHE = 'financas-v37';
 const ARQUIVOS = [
   './',
   './index.html',
@@ -43,7 +43,7 @@ self.addEventListener('fetch', (e) => {
 self.addEventListener('push', (e) => {
   let d = {};
   try { d = e.data.json(); } catch (_) { d = { body: e.data ? e.data.text() : '' }; }
-  e.waitUntil(self.registration.showNotification(d.title || 'Organização Financeira', {
+  e.waitUntil(self.registration.showNotification(d.title || 'Tino Finanças', {
     body: d.body || '', icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'lembrete', data: { url: d.url || './' },
   }));
 });

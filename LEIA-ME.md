@@ -1,4 +1,4 @@
-# Organização Financeira (app PWA)
+# Tino Finanças (app PWA)
 
 ## Publicar de graça (5 minutos)
 

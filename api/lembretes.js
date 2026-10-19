@@ -22,7 +22,7 @@ module.exports = async (req, res) => {
     if (nContas) partes.push(nContas === 1 ? '⏰ 1 conta vence amanhã.' : `⏰ ${nContas} contas vencem amanhã.`);
     if (r.diario && r.ultimoDia !== hoje) partes.push('✍️ Anotou seus gastos de hoje? Leva 10 segundos.');
     if (!partes.length){ if (r.diario && r.ultimoDia === hoje) jaAnotou++; continue; }
-    const msg = { title: nContas ? 'Contas vencendo' : 'Organização Financeira', body: partes.join(' '), url: nContas ? './?aba=contas' : './?novo=1' };
+    const msg = { title: nContas ? 'Contas vencendo' : 'Tino Finanças', body: partes.join(' '), url: nContas ? './?aba=contas' : './?novo=1' };
     try { await webpush.sendNotification(r.sub, JSON.stringify(msg), { TTL: 6 * 3600 }); enviados++; }
     catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) { await redis('HDEL', 'push', id); removidos++; }   // inscrição expirada
