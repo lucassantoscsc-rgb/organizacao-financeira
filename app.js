@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 42;
+const APP_VERSAO = 43;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -822,6 +822,36 @@ async function desligarNuvem(){
   gravarNuvem(null); render(); toast('Backup na nuvem desligado');
 }
 
+/* ---------- lista de espera: Tino Conectado ----------
+   Valida o interesse num plano futuro com Open Finance antes de construir.
+   Mostra um card no Resumo até a pessoa entrar na lista ou dispensar; também fica em Ajustes. */
+const PRECOS_LISTA = [['ate10','Até R$9,90'],['ate15','Até R$14,90'],['ate20','Até R$19,90'],['mais20','Mais de R$20'],['nao','Não pagaria']];
+const BANCOS_LISTA = ['Nubank','Itaú','Bradesco','Caixa','Banco do Brasil','Santander','Inter','C6','Mercado Pago','PicPay','Outro'];
+let listaSel = { preco:'', bancos:[] };
+function cardConectado(){
+  if (DEMO || !S.conta || S.lista) return '';
+  return `<div class="alert info conectado"><span>🏦</span><div><b>Em breve: Tino Conectado</b><br>Seus gastos entrando sozinhos, direto do seu banco, pelo Open Finance. Quer ser avisado primeiro?
+    <div class="acts"><button class="btn pri" data-act="listaAbrir">Quero saber mais</button><button class="btn sec" data-act="listaDispensar">Agora não</button></div></div></div>`;
+}
+function abrirLista(){
+  listaSel = { preco:'', bancos:[] };
+  abrir(`<h2>🏦 Tino Conectado</h2>
+    <p class="note" style="margin:0 0 10px">Estamos estudando conectar o Tino ao seu banco pelo <b>Open Finance</b>: seus gastos e entradas entrariam sozinhos, sem digitar nada.</p>
+    <p class="note" style="margin:0 0 14px">Seria um <b>plano opcional, com mensalidade</b>, porque a conexão com os bancos tem um custo mensal. <b>O Tino que você comprou continua vitalício</b>, sem nada a pagar.</p>
+    <div class="f"><label>Quanto você pagaria por mês por isso?</label><div class="opcoes" id="lPreco">${PRECOS_LISTA.map(([v,l])=>`<button data-act="listaPreco" data-v="${v}">${l}</button>`).join('')}</div></div>
+    <div class="f"><label>Quais bancos você usa? (pode marcar vários)</label><div class="opcoes" id="lBancos">${BANCOS_LISTA.map(b=>`<button data-act="listaBanco" data-v="${esc(b)}">${esc(b)}</button>`).join('')}</div></div>
+    <button class="btn pri" data-act="listaEntrar">Entrar na lista de espera</button>
+    <p class="note" style="text-align:center;margin-top:10px">Vamos avisar no e-mail ${esc(S.conta)} quando estiver disponível.</p>`);
+}
+function entrarLista(btn){
+  if (!listaSel.preco) return toast('Escolha quanto você pagaria por mês');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  fetch('api/lista', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ email:S.conta, preco:listaSel.preco, bancos:listaSel.bancos, de:'app', cliente:true }) })
+    .then(r => { if (!r.ok) throw 0; S.lista = new Date().toISOString(); salvar(); fechar(); render(); toast('Você está na lista! Vamos te avisar 💚'); })
+    .catch(() => { btn.disabled = false; btn.textContent = 'Entrar na lista de espera'; toast('Não foi possível enviar. Confira a internet.'); });
+}
+
 /* ---------- central de ajuda ---------- */
 const PERGUNTAS_AJUDA = [
   ['📲 Como instalo o app na tela de início?', 'No <b>iPhone</b>, abra o link no Safari, toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> e depois em <b>Adicionar à Tela de Início</b>. No <b>Android</b>, abra no Chrome, toque no menu <span class="kbd">⋮</span> e em <b>Instalar app</b>. Depois, abra sempre pelo ícone do Tino.'],
@@ -1602,6 +1632,7 @@ function telaResumo(){
   html += cardRetro();
   html += dicaTransferir();
   html += lembreteBackup();
+  if (!S.listaDispensada && !precisaBackup()) html += cardConectado();
   html += alertasContas();
   html += alertasOrcamento(C);
 
@@ -2361,6 +2392,9 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Dúvidas sobre instalar, trocar de celular, backup, Face ID ou notificações? As respostas estão aqui, e você pode falar com a gente.</p>
     <button class="btn pri" data-act="ajuda">❓ Central de ajuda</button>
     ${S.conta && !DEMO ? '<button class="btn sec" data-act="depoimento">💬 Deixar um depoimento</button>' : ''}</section>
+  ${S.conta && !DEMO ? `<section class="card"><h3>🏦 Em breve: Tino Conectado</h3>
+    <p class="note" style="margin:0 0 12px">Seus gastos entrando sozinhos, direto do banco, pelo Open Finance. Um plano opcional, com mensalidade; o Tino que você comprou continua vitalício.</p>
+    ${S.lista ? '<p class="note" style="margin:0"><span class="tag auto">✓ você está na lista</span> Vamos te avisar por e-mail.</p>' : '<button class="btn sec" data-act="listaAbrir">Entrar na lista de espera</button>'}</section>` : ''}
   <button class="btn sec" data-act="verTour">🎓 Ver tutorial de novo</button>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
@@ -2589,6 +2623,11 @@ document.addEventListener('click', e=>{
   const a = t.dataset.act;
   if (a==='fechar'){ fechar(); return; }
   if (a==='ajuda'){ abrirAjuda(); return; }
+  if (a==='listaAbrir'){ abrirLista(); return; }
+  if (a==='listaDispensar'){ S.listaDispensada = new Date().toISOString(); salvar(); render(); toast('Tudo bem! Se mudar de ideia, está em Ajustes.'); return; }
+  if (a==='listaPreco'){ listaSel.preco = t.dataset.v; document.querySelectorAll('#lPreco button').forEach(b=>b.classList.toggle('on', b===t)); return; }
+  if (a==='listaBanco'){ const v = t.dataset.v, i = listaSel.bancos.indexOf(v); i<0 ? listaSel.bancos.push(v) : listaSel.bancos.splice(i,1); t.classList.toggle('on', i<0); return; }
+  if (a==='listaEntrar'){ entrarLista(t); return; }
   if (a==='nuvemAtivar'){ abrirAtivarNuvem(); return; }
   if (a==='nuvemConfirmar'){ confirmarNuvem(t); return; }
   if (a==='nuvemRestaurar'){ abrirRestaurarNuvem(false); return; }
@@ -3125,7 +3164,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);

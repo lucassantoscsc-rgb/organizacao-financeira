@@ -179,6 +179,9 @@ a.btn{text-decoration:none}
 .ajuda summary::-webkit-details-marker{display:none}
 .ajuda p{margin:0 0 14px;font-size:14.5px;color:var(--muted);line-height:1.5}
 .ajuda-t{font-size:16px;margin:20px 0 12px}
+.opcoes{display:flex;flex-wrap:wrap;gap:8px}
+.opcoes button{padding:9px 13px;border-radius:99px;background:var(--track);font-size:14px;font-weight:600;color:var(--muted)}
+.opcoes button.on{background:var(--pri-bg);color:var(--pri-ink)}
 .nuvem{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
 .nuvem h4{margin:0 0 8px;font-size:15px}
 .f .money{font-size:22px;font-weight:700}
@@ -304,8 +307,8 @@ details.mais summary::before{content:"+ "}
 details.mais[open] summary::before{content:"− "}
 
 /* lembrete de backup */
-.alert.backup .acts{display:flex;gap:8px;margin-top:10px}
-.alert.backup .acts .btn{width:auto;flex:1;padding:10px;font-size:14px;margin:0}
+.alert.backup .acts,.alert.conectado .acts{display:flex;gap:8px;margin-top:10px}
+.alert.backup .acts .btn,.alert.conectado .acts .btn{width:auto;flex:1;padding:10px;font-size:14px;margin:0}
 
 /* instalar */
 .inst-atual{background:var(--surface-2);border-radius:12px;padding:12px 14px;margin:10px 0 4px;font-size:14px}
