@@ -21,7 +21,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 37;
+const APP_VERSAO = 38;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
