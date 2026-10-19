@@ -33,6 +33,11 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
 .tag{font-size:12px;padding:2px 8px;border-radius:999px}
 .tag.l{background:#e6faf6;color:var(--good)}.tag.u{background:#fdf3e1;color:var(--warn)}
 .stats{color:var(--muted);font-size:14px;margin-bottom:8px}
+.dep{border-top:1px solid var(--line);padding:12px 0}
+.dep q{display:block;font-size:15px;margin:4px 0 6px}
+.dep .n{color:var(--muted);font-size:13px}
+.dep .acts{display:flex;gap:6px;margin-top:8px}
+.tag.ok{background:#e6faf6;color:var(--good)}.tag.no{background:#f0f2f2;color:var(--muted)}
 #msg{color:var(--bad);font-size:14px;margin-top:8px}
 </style>
 </head>
@@ -63,6 +68,11 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
       <div class="stats" id="stats"></div>
       <div id="lista"></div>
     </div>
+    <div class="card">
+      <h2>Depoimentos do app</h2>
+      <div class="stats" id="depStats"></div>
+      <div id="deps"></div>
+    </div>
   </div>
 </main>
 <script>
@@ -90,7 +100,31 @@ async function entrar(){
 const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const data = iso => iso ? new Date(iso).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : '';
 
-async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); }
+async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); }
+let deps = [];
+async function carregarDeps(){ deps = (await api({acao:'depoimentos'})).lista; desenharDeps(); }
+function desenharDeps(){
+  const pub = deps.filter(d=>d.autoriza).length;
+  const media = deps.length ? (deps.reduce((s,d)=>s+d.nota,0)/deps.length).toFixed(1).replace('.',',') : '–';
+  document.getElementById('depStats').textContent = `${deps.length} recebidos · ${pub} com autorização para publicar · nota média ${media}`;
+  document.getElementById('deps').innerHTML = deps.map((d,i) => `
+    <div class="dep">
+      <span>${'★'.repeat(d.nota)}${'☆'.repeat(5-d.nota)}</span>
+      ${d.autoriza ? '<span class="tag ok">pode publicar</span>' : '<span class="tag no">só para você</span>'}
+      <q>${esc(d.texto)}</q>
+      <div class="n">${esc(d.nome)||'sem nome'} · ${esc(d.conta)} · ${data(d.em)}</div>
+      <div class="acts">
+        ${d.autoriza ? `<button class="sec" data-dep-copiar="${i}">Copiar</button>` : ''}
+        <button class="del" data-dep-apagar="${esc(d.conta)}">Apagar</button>
+      </div>
+    </div>`).join('') || '<p class="stats">Nenhum depoimento ainda. O app pede depois de 7 dias de uso.</p>';
+}
+document.getElementById('deps').onclick = async e => {
+  const c = e.target.closest('[data-dep-copiar]'), a = e.target.closest('[data-dep-apagar]');
+  if (c){ const d = deps[+c.dataset.depCopiar];
+    try { await navigator.clipboard.writeText(`“${d.texto}” — ${d.nome || 'Cliente'}`); alert('Depoimento copiado!'); } catch(err){ alert('Não consegui copiar.'); } }
+  if (a && confirm('Apagar este depoimento?')){ await api({ acao:'apagarDepoimento', codigo:a.dataset.depApagar }); carregarDeps(); }
+};
 function desenhar(){
   const q = document.getElementById('busca').value.trim().toLowerCase();
   const vis = todos.filter(x => !q || x.codigo.toLowerCase().includes(q) || (x.nota||'').toLowerCase().includes(q));

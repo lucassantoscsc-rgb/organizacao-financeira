@@ -11,6 +11,9 @@ const CONFIG = {
   exigirCodigo: true,
   // Link que aparece na imagem da retrospectiva compartilhada (ex.: sua página de vendas). Vazio = só o nome do app.
   linkDivulgacao: 'planilhadeorganizacaofinanceira.online',
+  // Suporte (central de ajuda em Ajustes). WhatsApp só com números, com DDI e DDD (ex.: '5511999999999'). Vazio = só e-mail.
+  suporteEmail: 'suporteplanilhass@gmail.com',
+  suporteWhatsApp: '',
   frases: [
     'Pequenas ações geram grandes resultados.',
     'Quem anota, controla. Quem controla, conquista.',
@@ -21,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 39;
+const APP_VERSAO = 40;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -689,6 +692,84 @@ function cardNotificacoes(){
     <div class="switch" style="margin-top:8px"><span>Aviso de contas <small class="muted">(na véspera do vencimento)</small></span><button class="tg ${n.contas?'on':''}" data-act="notif" data-tipo="contas" aria-label="Aviso de contas"></button></div>
     ${notifLigada() ? '<button class="btn sec" data-act="notifTeste" style="margin-top:10px">🔔 Enviar notificação de teste</button>' : ''}
     ${negado ? '<p class="note">As notificações estão bloqueadas para este app. Libere nos ajustes do celular.</p>' : '<p class="note">Para avisar das contas, o app envia só as datas de vencimento, sem nomes nem valores.</p>'}`}</section>`;
+}
+
+/* ---------- central de ajuda ---------- */
+const PERGUNTAS_AJUDA = [
+  ['📲 Como instalo o app na tela de início?', 'No <b>iPhone</b>, abra o link no Safari, toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> e depois em <b>Adicionar à Tela de Início</b>. No <b>Android</b>, abra no Chrome, toque no menu <span class="kbd">⋮</span> e em <b>Instalar app</b>. Depois, abra sempre pelo ícone do Tino.'],
+  ['🔄 Troquei de celular. Como levo meus dados?', 'Seus dados ficam só no aparelho. No celular antigo, vá em <b>Ajustes → Backup dos dados → Fazer backup</b> e guarde o arquivo (Drive, iCloud, WhatsApp ou e-mail). No celular novo, entre com o mesmo e-mail e use <b>Restaurar backup</b>.'],
+  ['🤔 Por que os dados de um aparelho não aparecem no outro?', 'Cada aparelho guarda os próprios dados, para sua privacidade. No iPhone, o app instalado e o Safari também são separados. Para levar os dados de um para o outro, use o backup.'],
+  ['💾 Como faço backup?', 'Em <b>Ajustes → Backup dos dados</b>, toque em <b>Fazer backup</b>. Recomendamos uma vez por semana. O app avisa quando faz tempo que você não faz.'],
+  ['🎙️ Como lanço um gasto falando ou escrevendo?', 'Ao lançar um gasto, use o campo com ✨ no topo e escreva ou dite algo como <b>“gastei 45 no ifood no crédito”</b>. O app preenche valor, categoria e forma de pagamento. No iPhone, toque no microfone do teclado para ditar.'],
+  ['💳 Como funcionam os cartões e as faturas?', 'Em <b>Planejar → Cartões</b>, cadastre o dia de fechamento e de vencimento. Ao lançar uma compra no crédito, ela cai na fatura certa, e as parcelas entram sozinhas nos próximos meses.'],
+  ['🔒 Como coloco senha ou Face ID?', 'Em <b>Ajustes → Privacidade</b>, crie uma senha de 4 dígitos. Depois disso, aparece a opção de entrar com Face ID ou digital, se o seu aparelho tiver.'],
+  ['🔔 As notificações não chegam. O que faço?', 'No iPhone, as notificações só funcionam com o app <b>instalado na tela de início</b>. Ative em <b>Ajustes → Notificações</b> e permita quando o celular perguntar. Use <b>Enviar notificação de teste</b> para conferir.'],
+  ['📱 Em quantos aparelhos posso usar?', 'Em até 3 aparelhos com o mesmo e-mail. Em <b>Ajustes → Conta → Aparelhos conectados</b> você vê e remove aparelhos para liberar espaço.'],
+  ['🛡️ Como funciona a garantia?', 'Você tem 7 dias de garantia a partir da compra. Se precisar, fale com o suporte pelos botões abaixo.']
+];
+function linkSuporte(){
+  const corpo = `\n\n—\nApp: ${CONFIG.nomeApp} v${APP_VERSAO}\nAparelho: ${nomeAparelho()}${S.conta ? '\nConta: '+S.conta : ''}`;
+  return {
+    whats: CONFIG.suporteWhatsApp ? `https://wa.me/${CONFIG.suporteWhatsApp}?text=${encodeURIComponent('Olá! Preciso de ajuda com o Tino Finanças.')}` : '',
+    email: `mailto:${CONFIG.suporteEmail}?subject=${encodeURIComponent('Ajuda com o '+CONFIG.nomeApp)}&body=${encodeURIComponent('Escreva sua dúvida aqui:'+corpo)}`
+  };
+}
+function abrirAjuda(){
+  const l = linkSuporte();
+  abrir(`<h2>❓ Central de ajuda</h2>
+    <div class="ajuda">${PERGUNTAS_AJUDA.map(([p,r])=>`<details><summary>${p}</summary><p>${r}</p></details>`).join('')}</div>
+    <h3 class="ajuda-t">Ainda precisa de ajuda?</h3>
+    ${l.whats ? `<a class="btn pri" href="${l.whats}" target="_blank" rel="noopener">💬 Falar no WhatsApp</a>` : ''}
+    <a class="btn ${l.whats?'sec':'pri'}" href="${l.email}">✉️ Enviar e-mail para o suporte</a>
+    <p class="note" style="text-align:center">${esc(CONFIG.suporteEmail)}</p>
+    <button class="btn sec" data-act="ajudaTour">🎓 Ver o tutorial de novo</button>`);
+}
+
+/* ---------- pedido de depoimento ----------
+   Pede uma vez depois de 7 dias de uso (e pelo menos 3 dias com lançamentos).
+   "Agora não" pergunta de novo em 10 dias, no máximo mais uma vez. */
+function talvezPedirDepoimento(){
+  if (DEMO || !S.liberado || !S.perfil.ok || !S.conta || !navigator.onLine || ocupado()) return;
+  if (document.getElementById('conq')) return setTimeout(talvezPedirDepoimento, 5000);   // espera o aviso de conquista sumir
+  const d = S.depo || {};
+  if (d.enviado || d.nunca || (d.vezes||0) >= 2) return;
+  if (d.depoisDe && Date.now() < new Date(d.depoisDe).getTime()) return;
+  const dias = [...new Set(S.diasAtivos||[])].sort();
+  if (dias.length < 3 || diasDesde(dias[0]) < 7) return;
+  abrirDepoimento(true);
+}
+let depoNotaSel = 0;
+function abrirDepoimento(automatico){
+  depoNotaSel = 0;
+  const primeiro = (S.perfil.nome||'').trim().split(/\s+/)[0] || '';
+  abrir(`<h2>💬 Está gostando do Tino?</h2>
+    <p class="note" style="margin:0 0 12px">Sua opinião ajuda a melhorar o app e a mostrar para outras pessoas como ele funciona na prática.</p>
+    <div class="estrelas" role="radiogroup" aria-label="Sua nota">${[1,2,3,4,5].map(n=>`<button data-act="depoNota" data-v="${n}" aria-label="${n} estrela${n>1?'s':''}">★</button>`).join('')}</div>
+    <div class="f"><label id="dLabel">Conte em uma frase o que mudou para você</label><textarea id="dTexto" rows="3" maxlength="600" placeholder="Ex.: agora eu sei exatamente quanto posso gastar até o fim do mês"></textarea></div>
+    <div class="f"><label>Seu primeiro nome</label><input id="dNome" value="${esc(primeiro)}" maxlength="40" autocomplete="given-name"></div>
+    <label class="aut" id="dAutLinha"><input type="checkbox" id="dAut"> <span>Autorizo publicar este depoimento com meu primeiro nome</span></label>
+    <button class="btn pri" data-act="depoEnviar">Enviar</button>
+    ${automatico ? `<button class="btn sec" data-act="depoDepois">Agora não</button><button class="link-sutil" data-act="depoNunca">Não perguntar mais</button>` : ''}`);
+}
+function depoNota(n){
+  depoNotaSel = n;
+  document.querySelectorAll('.estrelas button').forEach((b,i)=>b.classList.toggle('on', i < n));
+  const baixa = n <= 3;
+  document.getElementById('dLabel').textContent = baixa ? 'O que podemos melhorar?' : 'Conte em uma frase o que mudou para você';
+  document.getElementById('dTexto').placeholder = baixa ? 'Conte o que não funcionou bem ou o que faltou' : 'Ex.: agora eu sei exatamente quanto posso gastar até o fim do mês';
+}
+function enviarDepoimento(){
+  const texto = document.getElementById('dTexto').value.trim();
+  if (!depoNotaSel) return toast('Toque nas estrelas para dar sua nota');
+  if (texto.length < 3) return toast('Escreva pelo menos uma frase');
+  const btn = document.querySelector('[data-act="depoEnviar"]'); btn.disabled = true; btn.textContent = 'Enviando…';
+  fetch('api/depoimentos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    conta:S.conta, aparelho:idAparelho(), nota:depoNotaSel, texto,
+    nome:document.getElementById('dNome').value.trim(), autoriza:document.getElementById('dAut').checked }) })
+    .then(r => { if (!r.ok) throw 0;
+      S.depo = { ...(S.depo||{}), enviado:true }; salvar(); fechar();
+      toast(depoNotaSel >= 4 ? 'Obrigado pelo depoimento! 💚' : 'Obrigado! Vamos usar sua opinião para melhorar.'); })
+    .catch(() => { btn.disabled = false; btn.textContent = 'Enviar'; toast('Não foi possível enviar. Confira a internet e tente de novo.'); });
 }
 
 /* ---------- sequência e conquistas ---------- */
@@ -2146,6 +2227,10 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
     ${S.conta ? '<button class="btn sec" data-act="aparelhos">📱 Aparelhos conectados</button>' : '<p class="note" style="margin:0 0 12px">Para ver e gerenciar seus aparelhos, saia e entre de novo com seu e-mail (seus dados ficam guardados).</p>'}
     <button class="btn sec" data-act="sair">Sair da conta</button></section>
+  <section class="card" id="cardAjuda"><h3>Ajuda e suporte</h3>
+    <p class="note" style="margin:0 0 12px">Dúvidas sobre instalar, trocar de celular, backup, Face ID ou notificações? As respostas estão aqui, e você pode falar com a gente.</p>
+    <button class="btn pri" data-act="ajuda">❓ Central de ajuda</button>
+    ${S.conta && !DEMO ? '<button class="btn sec" data-act="depoimento">💬 Deixar um depoimento</button>' : ''}</section>
   <button class="btn sec" data-act="verTour">🎓 Ver tutorial de novo</button>
   <button class="btn dan" data-act="zerar">Apagar todos os dados</button>`;
 }
@@ -2372,6 +2457,13 @@ document.addEventListener('click', e=>{
     salvar(); render(); checarConquistas(); return;
   }
   const a = t.dataset.act;
+  if (a==='ajuda'){ abrirAjuda(); return; }
+  if (a==='ajudaTour'){ fechar(); setTimeout(iniciarTour, 250); return; }
+  if (a==='depoimento'){ abrirDepoimento(); return; }
+  if (a==='depoNota'){ depoNota(+t.dataset.v); return; }
+  if (a==='depoEnviar'){ enviarDepoimento(); return; }
+  if (a==='depoDepois'){ S.depo = { ...(S.depo||{}), vezes:((S.depo||{}).vezes||0)+1, depoisDe: new Date(Date.now()+10*864e5).toISOString() }; salvar(); fechar(); return; }
+  if (a==='depoNunca'){ S.depo = { ...(S.depo||{}), nunca:true }; salvar(); fechar(); return; }
   if (a==='limparBusca'){ busca=''; render(); }
   else if (a==='prev'){ cur = prevYM(cur.y,cur.m); evoSel=null; render(); }
   else if (a==='next'){ cur = nextYM(cur.y,cur.m); evoSel=null; render(); }
@@ -2892,7 +2984,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
@@ -2900,6 +2992,7 @@ function iniciarApp(){
   if (S.liberado && S.perfil.ok && S.tourVisto === false) iniciarTour();
   mostrarNovidades();
   setTimeout(checarConquistas, 1200);
+  setTimeout(talvezPedirDepoimento, 2500);
 }
 if (DEMO){
   const salvo = S;   // mantém só preferências visuais do aparelho
