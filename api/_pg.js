@@ -34,6 +34,31 @@ async function criarTabelas() {
     expira     timestamptz NOT NULL
   )`;
   await sql`CREATE INDEX IF NOT EXISTS sessoes_email ON sessoes(email)`;
+  // Dados sincronizados do app: uma linha por item (um gasto, um cartão, uma configuração...).
+  // 'seq' cresce a cada alteração; cada aparelho guarda até onde já recebeu.
+  await sql`CREATE SEQUENCE IF NOT EXISTS itens_seq`;
+  await sql`CREATE TABLE IF NOT EXISTS itens (
+    email    text NOT NULL REFERENCES contas(email) ON DELETE CASCADE,
+    chave    text NOT NULL,
+    valor    jsonb,
+    apagado  boolean NOT NULL DEFAULT false,
+    seq      bigint NOT NULL,
+    aparelho text,
+    alterado timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (email, chave)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS itens_email_seq ON itens(email, seq)`;
 }
 
-module.exports = { banco };
+// Sessão do Tino Plus a partir do cabeçalho "Authorization: Bearer <token>".
+const crypto = require('crypto');
+const hash = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
+async function sessao(req, sql) {
+  const t = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (t.length < 20) return null;
+  const [s] = await sql`SELECT email, token_hash FROM sessoes WHERE token_hash = ${hash(t)} AND expira > now()`;
+  return s || null;
+}
+const plusAtivo = (c) => !!c && c.plano === 'plus' && (!c.plus_ate || new Date(c.plus_ate) > new Date());
+
+module.exports = { banco, sessao, hash, plusAtivo };

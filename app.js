@@ -107,7 +107,7 @@ function aplicarTema(){
 }
 aplicarTema();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', aplicarTema);
-function salvar(){ if (DEMO) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){ toast('Não foi possível salvar no aparelho'); } if (typeof agendarSyncNotif === 'function') agendarSyncNotif(); }
+function salvar(){ if (DEMO) return; try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){ toast('Não foi possível salvar no aparelho'); } if (typeof agendarSyncNotif === 'function') agendarSyncNotif(); if (typeof agendarSync === 'function') agendarSync(); }
 
 const hoje = new Date();
 let cur = { y: hoje.getFullYear(), m: hoje.getMonth() };   // mês aberto
@@ -1400,8 +1400,21 @@ async function abrirPlus(){
     <p class="note" style="margin:-4px 0 14px">Conectado como <b>${esc(c.email)}</b>.</p>
     <div class="ind-cod"><small>Seu plano</small><b style="letter-spacing:0">${c.plusAtivo ? 'Plus ativo' : 'Gratuito'}</b></div>
     ${c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : ''}
-    <p class="note" style="margin:0 0 14px">Em breve: seus dados em todos os aparelhos e o Tino no WhatsApp.</p>
+    ${blocoSync()}
+    <p class="note" style="margin:14px 0">Em breve: o Tino no WhatsApp.</p>
     <button class="btn sec" data-act="plusSair">Sair do Plus neste aparelho</button>`);
+}
+function blocoSync(){
+  const st = syncEstado();
+  if (!st || !st.ligado) return `<h3 style="margin:18px 0 6px">🔄 Seus dados em todos os aparelhos</h3>
+    <p class="note" style="margin:0 0 12px">Com a sincronização, seus lançamentos ficam salvos no servidor do Tino e aparecem em qualquer aparelho em que você entrar com este e-mail. Se perder ou trocar de celular, nada se perde.</p>
+    <p class="note" style="margin:0 0 12px">🔒 Seus dados ficam protegidos pelo seu login e só são usados para os recursos do Tino (como o assistente no WhatsApp). Diferente do backup com senha, o servidor do Tino consegue ler estes dados para fazer esses recursos funcionarem.</p>
+    <button class="btn pri" data-act="syncLigar">Ligar sincronização</button>`;
+  const quando = st.ultima ? new Date(st.ultima).toLocaleString('pt-BR', { dateStyle:'short', timeStyle:'short' }) : 'ainda não';
+  return `<h3 style="margin:18px 0 6px">🔄 Sincronização ligada</h3>
+    <p class="note" style="margin:0 0 12px">Última sincronização: <b>${quando}</b>${st.erro ? ` · <span style="color:var(--danger-ink)">não foi possível na última tentativa</span>` : ''}.</p>
+    <button class="btn sec" data-act="syncAgora">🔄 Sincronizar agora</button>
+    <button class="link-sutil" data-act="syncDesligar">Desligar a sincronização neste aparelho</button>`;
 }
 function plusPedir(btn){
   plusEmail = document.getElementById('plusEmail').value.trim().toLowerCase();
@@ -1427,6 +1440,135 @@ function plusEntrar(btn){
     plusGuardar({ email:d.conta.email, token:d.token }); toast('Pronto, você entrou ✓'); abrirPlus();
   }).catch(() => { btn.disabled = false; btn.textContent = 'Entrar'; toast('Sem conexão. Tente de novo.'); });
 }
+
+/* ---------- sincronização do Tino Plus ----------
+   O app continua gravando tudo no aparelho. Com a sincronização ligada, ele quebra os dados em itens
+   (cada gasto, entrada, cartão, cofrinho... e cada configuração), compara com o que já foi enviado e manda
+   só o que mudou para api/sync. Depois aplica o que veio de outros aparelhos. Vale a alteração mais recente;
+   uma mudança feita aqui e ainda não enviada nunca é sobrescrita.
+   Chaves:  i|<lista>|<id>  item de uma lista (ex.: i|m/2026-10/gastos|abc)
+            a|<lista>       a lista existe (mesmo vazia)
+            v|<caminho>     um valor inteiro (perfil, orçamentos, uma lista sem ids...)
+   Campos que são só deste aparelho (acesso, senha, notificações, tema...) nunca sincronizam. */
+const SYNC_LOCAIS = new Set(['v','liberado','conta','ultimoBackup','novosDesdeBackup','backupAdiado','seguranca','notif','notifSync','verificadoEm','tema','ocultar']);
+const SYNC_KEY = (email) => 'orgfin:plus:sync:' + email;
+const listaComIds = (x) => Array.isArray(x) && x.every(i => i && typeof i === 'object' && !Array.isArray(i) && typeof i.id === 'string' && i.id && !i.id.includes('|'));
+function achatar(est){
+  const out = {};
+  const parte = (cam, val) => {
+    if (val === undefined) return;
+    if (listaComIds(val)){ out['a|' + cam] = 1; val.forEach((it, o) => { out['i|' + cam + '|' + it.id] = { ...it, __o:o }; }); }
+    else out['v|' + cam] = val;
+  };
+  Object.keys(est).forEach(k => {
+    if (SYNC_LOCAIS.has(k)) return;
+    if (k === 'meses') Object.entries(est.meses || {}).forEach(([mk, M]) => Object.keys(M || {}).forEach(c => parte('m/' + mk + '/' + c, M[c])));
+    else parte(k, est[k]);
+  });
+  return out;
+}
+function montar(mapa, base){
+  const est = { meses:{} }, listas = {};
+  Object.keys(base).forEach(k => { if (SYNC_LOCAIS.has(k)) est[k] = base[k]; });
+  const por = (cam, val) => {
+    const p = cam.split('/');
+    if (p[0] === 'm' && p.length === 3){ (est.meses[p[1]] = est.meses[p[1]] || {})[p[2]] = val; }
+    else est[cam] = val;
+  };
+  Object.entries(mapa).forEach(([k, val]) => {
+    const t = k.slice(0, 2), resto = k.slice(2);
+    if (t === 'v|') por(resto, val);
+    else if (t === 'a|') listas[resto] = listas[resto] || [];
+    else if (t === 'i|'){ const j = resto.lastIndexOf('|'), cam = resto.slice(0, j); (listas[cam] = listas[cam] || []).push(val); }
+  });
+  Object.entries(listas).forEach(([cam, itens]) => por(cam, itens.sort((x, y) => (x.__o ?? 0) - (y.__o ?? 0)).map(({ __o, ...it }) => it)));
+  Object.values(est.meses).forEach(M => ['entradas','gastos','contas','reservas'].forEach(c => { if (!Array.isArray(M[c])) M[c] = []; }));
+  return est;
+}
+function hashTxt(t){ let h = 2166136261; for (let i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + t.length.toString(36); }
+const hashVal = (v) => hashTxt(JSON.stringify(v));
+function syncEstado(){ const ses = plusSessao(); if (!ses) return null; try { return JSON.parse(localStorage.getItem(SYNC_KEY(ses.email)) || 'null'); } catch(e){ return null; } }
+function syncGuardar(st){ const ses = plusSessao(); if (!ses) return; try { st ? localStorage.setItem(SYNC_KEY(ses.email), JSON.stringify(st)) : localStorage.removeItem(SYNC_KEY(ses.email)); } catch(e){ toast('Sem espaço no aparelho para a sincronização'); } }
+const syncLigada = () => !DEMO && !!plusSessao() && !!(syncEstado() || {}).ligado;
+let syncTimer = null, syncRodando = false, syncDeNovo = false, aplicandoRemoto = false;
+function agendarSync(ms){
+  if (aplicandoRemoto || !syncLigada()) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncAgora(), ms ?? 4000);
+}
+const apiSync = (dados) => plusApi(dados).then(d => { if (d.status === 401){ plusGuardar(null); throw new Error('sessao'); } if (!d.ok) throw new Error(d.erro || 'falha'); return d; });
+
+// Uma rodada: envia o que mudou (em lotes) e aplica o que chegou. modo 'juntar' (primeira vez com dados nos
+// dois lados: envia só os itens das listas e fica com as configurações da nuvem) ou 'nuvem' (usa só a nuvem).
+async function syncAgora(modo, manual){
+  if (!syncLigada() || !navigator.onLine) return false;
+  if (!modo && !manual && form){ agendarSync(5000); return false; }   // não mexe nos dados com um lançamento aberto
+  if (syncRodando){ syncDeNovo = true; return false; }
+  syncRodando = true;
+  const st = syncEstado();
+  try {
+    const hashes = modo === 'nuvem' ? {} : { ...(st.hashes || {}) };
+    let cursor = st.cursor || 0;
+    const local = modo === 'nuvem' ? {} : achatar(S);
+    let mudancas = [];
+    if (modo !== 'nuvem'){
+      Object.entries(local).forEach(([k, v]) => { if (modo === 'juntar' && k.startsWith('v|')) return; const h = hashVal(v); if (hashes[k] !== h) mudancas.push({ k, v, h }); });
+      if (modo !== 'juntar') Object.keys(hashes).forEach(k => { if (!(k in local)) mudancas.push({ k, d:true }); });
+    }
+    const recebidos = [];
+    do {
+      const lote = mudancas.slice(0, 500); mudancas = mudancas.slice(500);
+      const d = await apiSync({ acao:'sync', cursor, aparelho:idAparelho(), mudancas: lote.map(({ h, ...m }) => m) });
+      lote.forEach(m => { if (m.d) delete hashes[m.k]; else hashes[m.k] = m.h; });
+      recebidos.push(...d.itens); cursor = d.cursor;
+      if (!lote.length && !d.mais) break;
+    } while (true);
+    if (recebidos.length || modo === 'nuvem'){
+      // Aplica o que chegou sobre o estado ATUAL (o que foi editado durante a rodada continua valendo)
+      const atual = modo === 'nuvem' ? {} : achatar(S);
+      recebidos.forEach(r => {
+        if (atual[r.k] !== undefined && hashes[r.k] !== undefined && hashVal(atual[r.k]) !== hashes[r.k]) return;   // mudou aqui e ainda não foi enviado
+        if (r.d){ delete atual[r.k]; delete hashes[r.k]; } else { atual[r.k] = r.v; hashes[r.k] = hashVal(r.v); }
+      });
+      aplicandoRemoto = true;
+      try { S = montar(atual, S); migrar(); salvar(); } finally { aplicandoRemoto = false; }
+      if (!form && !$ov.classList.contains('open')) render();
+    }
+    syncGuardar({ ...syncEstado(), ligado:true, cursor, hashes, ultima:new Date().toISOString(), erro:'' });
+    return true;
+  } catch(e){
+    if (e.message !== 'sessao') syncGuardar({ ...(syncEstado() || st), erro: e.message });
+    return false;
+  } finally {
+    syncRodando = false;
+    if (syncDeNovo){ syncDeNovo = false; agendarSync(1000); }
+  }
+}
+const temDadosLocais = () => Object.values(S.meses || {}).some(M => M.gastos.length || M.entradas.length || M.contas.length || M.reservas.length) || (S.cartoes || []).length > 0;
+// Ligar: na primeira vez, se a nuvem já tem dados e o aparelho também, pergunta o que fazer.
+async function ligarSync(btn){
+  btn.disabled = true; btn.textContent = 'Preparando…';
+  let n = 0;
+  try { n = (await apiSync({ acao:'estado' })).itens; }
+  catch(e){ btn.disabled = false; btn.textContent = 'Ligar sincronização'; return toast('Sem conexão com o servidor. Tente de novo.'); }
+  syncGuardar({ ligado:true, cursor:0, hashes:{} });
+  if (n > 0 && temDadosLocais()) return abrir(`<h2>Você já tem dados no Plus</h2>
+    <p class="note" style="margin:-4px 0 14px">Esta conta já tem lançamentos salvos de outro aparelho. O que fazer com os dados deste celular?</p>
+    <button class="btn pri" data-act="syncJuntar">Juntar com os da nuvem</button>
+    <p class="note" style="margin:6px 0 12px">Os lançamentos dos dois lados ficam. As configurações (perfil, orçamentos) ficam as da nuvem.</p>
+    <button class="btn sec" data-act="syncNuvem">Usar só os da nuvem</button>
+    <p class="note" style="margin:6px 0 0">Os dados deste celular são trocados pelos da nuvem. Uma cópia deles fica guardada no aparelho.</p>`);
+  await rodarPrimeiraSync(n > 0 ? 'nuvem' : undefined);
+}
+async function rodarPrimeiraSync(modo){
+  if (modo === 'nuvem' && temDadosLocais()){ try { localStorage.setItem('orgfin:antesDoPlus', JSON.stringify(S)); } catch(e){} }
+  abrir(`<h2>⭐ Sincronizando…</h2><p class="note">Enviando e recebendo seus dados. Pode levar alguns segundos.</p>`);
+  const ok = await syncAgora(modo);
+  if (!ok){ const st = syncEstado(); if (st && !st.ultima) syncGuardar(null); toast('Não foi possível sincronizar. Tente de novo.'); return abrirPlus(); }
+  toast('Sincronização ligada ✓'); abrirPlus();
+}
+// Sincroniza ao abrir o app, ao voltar para ele e quando a internet volta.
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') agendarSync(800); });
+window.addEventListener('online', () => agendarSync(800));
 
 /* ---------- categorias do cliente ---------- */
 let catEd = null;   // categoria sendo criada/editada: { i (índice em S.catsExtras ou -1), emoji, ess }
@@ -3258,7 +3400,12 @@ document.addEventListener('click', e=>{
   if (a==='plus'){ abrirPlus(); return; }
   if (a==='plusPedir'){ plusPedir(t); return; }
   if (a==='plusEntrar'){ plusEntrar(t); return; }
-  if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
+  if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); syncGuardar(null); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
+  if (a==='syncLigar'){ ligarSync(t); return; }
+  if (a==='syncJuntar'){ rodarPrimeiraSync('juntar'); return; }
+  if (a==='syncNuvem'){ rodarPrimeiraSync('nuvem'); return; }
+  if (a==='syncAgora'){ t.disabled = true; t.textContent = 'Sincronizando…'; syncAgora(undefined, true).then(ok => { toast(ok ? 'Sincronizado ✓' : 'Não foi possível sincronizar agora'); abrirPlus(); }); return; }
+  if (a==='syncDesligar'){ if (!confirm('Desligar a sincronização neste aparelho? Seus dados continuam aqui e no servidor.')) return; syncGuardar(null); abrirPlus(); toast('Sincronização desligada neste aparelho'); return; }
   if (a==='indique'){ abrirIndique(); return; }
   if (a==='indiqueOcultar'){ S.indiqueOculto = true; salvar(); render(); return; }
   if (a==='indiqueEnviar'){ const txt = textoConvite();
@@ -3796,7 +3943,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['plus','plusPedir','plusEntrar','excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','indique','indiqueUsar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['plus','plusPedir','plusEntrar','syncLigar','syncAgora','excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','indique','indiqueUsar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
@@ -3813,6 +3960,7 @@ function iniciarApp(){
   setTimeout(talvezPedirDepoimento, 2500);
   setTimeout(talvezPedirNps, 3500);
   setTimeout(backupAutomatico, 4000);
+  agendarSync(1500);
 }
 if (TESTE && !DEMO){
   document.body.classList.add('demo');

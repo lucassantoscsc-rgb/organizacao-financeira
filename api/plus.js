@@ -6,11 +6,10 @@
 // No endereço de teste o código também volta na resposta, para testar sem depender do e-mail.
 const crypto = require('crypto');
 const { redis } = require('./_db');
-const { banco } = require('./_pg');
+const { banco, sessao, hash, plusAtivo } = require('./_pg');
 
 const TESTE = process.env.VERCEL_ENV !== 'production';
 const REMETENTE = 'Tino Finanças <nao-responda@tinofinancas.com.br>';
-const hash = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 const emailOk = (e) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[a-z]{2,}$/i.test(e);
 
 // Limite de pedidos: 'n' por 'seg' segundos para a mesma chave.
@@ -36,14 +35,8 @@ async function enviarCodigo(email, codigo) {
   if (!r.ok) throw new Error('Falha ao enviar o e-mail (' + r.status + ')');
 }
 
-async function sessao(req, sql) {
-  const t = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (t.length < 20) return null;
-  const [s] = await sql`SELECT s.email, s.token_hash FROM sessoes s WHERE s.token_hash = ${hash(t)} AND s.expira > now()`;
-  return s || null;
-}
 const contaPublica = (c) => ({ email: c.email, plano: c.plano, plusAte: c.plus_ate, fundador: c.fundador, whatsapp: !!c.whatsapp,
-  plusAtivo: c.plano === 'plus' && (!c.plus_ate || new Date(c.plus_ate) > new Date()) });
+  plusAtivo: plusAtivo(c) });
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
