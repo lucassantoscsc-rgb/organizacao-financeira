@@ -1447,7 +1447,8 @@ function plusEntrar(btn){
    só o que mudou para api/sync. Depois aplica o que veio de outros aparelhos. Vale a alteração mais recente;
    uma mudança feita aqui e ainda não enviada nunca é sobrescrita.
    Chaves:  i|<lista>|<id>  item de uma lista (ex.: i|m/2026-10/gastos|abc)
-            a|<lista>       a lista existe (mesmo vazia)
+            o|<lista>       a ordem da lista (só os ids; existe mesmo com a lista vazia). Fica separada dos itens
+                            para que apagar ou reordenar não reenvie, nem sobrescreva, os outros itens
             v|<caminho>     um valor inteiro (perfil, orçamentos, uma lista sem ids...)
    Campos que são só deste aparelho (acesso, senha, notificações, tema...) nunca sincronizam. */
 const SYNC_LOCAIS = new Set(['v','liberado','conta','ultimoBackup','novosDesdeBackup','backupAdiado','seguranca','notif','notifSync','verificadoEm','tema','ocultar']);
@@ -1457,7 +1458,7 @@ function achatar(est){
   const out = {};
   const parte = (cam, val) => {
     if (val === undefined) return;
-    if (listaComIds(val)){ out['a|' + cam] = 1; val.forEach((it, o) => { out['i|' + cam + '|' + it.id] = { ...it, __o:o }; }); }
+    if (listaComIds(val)){ out['o|' + cam] = val.map(it => it.id); val.forEach(it => { out['i|' + cam + '|' + it.id] = it; }); }
     else out['v|' + cam] = val;
   };
   Object.keys(est).forEach(k => {
@@ -1468,7 +1469,7 @@ function achatar(est){
   return out;
 }
 function montar(mapa, base){
-  const est = { meses:{} }, listas = {};
+  const est = { meses:{} }, listas = {}, ordens = {};
   Object.keys(base).forEach(k => { if (SYNC_LOCAIS.has(k)) est[k] = base[k]; });
   const por = (cam, val) => {
     const p = cam.split('/');
@@ -1478,10 +1479,14 @@ function montar(mapa, base){
   Object.entries(mapa).forEach(([k, val]) => {
     const t = k.slice(0, 2), resto = k.slice(2);
     if (t === 'v|') por(resto, val);
-    else if (t === 'a|') listas[resto] = listas[resto] || [];
+    else if (t === 'o|'){ listas[resto] = listas[resto] || []; ordens[resto] = Array.isArray(val) ? val : []; }
     else if (t === 'i|'){ const j = resto.lastIndexOf('|'), cam = resto.slice(0, j); (listas[cam] = listas[cam] || []).push(val); }
   });
-  Object.entries(listas).forEach(([cam, itens]) => por(cam, itens.sort((x, y) => (x.__o ?? 0) - (y.__o ?? 0)).map(({ __o, ...it }) => it)));
+  // Itens fora da ordem (vindos de outro aparelho antes da ordem atualizar) vão para o fim, pela data.
+  Object.entries(listas).forEach(([cam, itens]) => {
+    const pos = new Map((ordens[cam] || []).map((id, i) => [id, i]));
+    por(cam, itens.sort((x, y) => (pos.get(x.id) ?? 1e9) - (pos.get(y.id) ?? 1e9) || String(x.data || '').localeCompare(String(y.data || '')) || String(x.id).localeCompare(String(y.id))));
+  });
   Object.values(est.meses).forEach(M => ['entradas','gastos','contas','reservas'].forEach(c => { if (!Array.isArray(M[c])) M[c] = []; }));
   return est;
 }
