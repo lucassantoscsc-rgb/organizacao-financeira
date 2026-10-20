@@ -1370,6 +1370,64 @@ function confirmarIndicacao(btn){
   }).catch(() => { btn.disabled = false; btn.textContent = 'Confirmar'; toast('Não foi possível confirmar. Confira a internet.'); });
 }
 
+/* ---------- Tino Plus (em construção: só aparece no endereço de teste) ----------
+   Login com código de 6 dígitos enviado por e-mail (api/plus). A sessão fica numa chave própria do aparelho,
+   fora do S, para não ir junto nos arquivos de backup. */
+const PLUS_KEY = 'orgfin:plus';
+function plusSessao(){ try { return JSON.parse(localStorage.getItem(PLUS_KEY) || 'null'); } catch(e){ return null; } }
+function plusGuardar(v){ try { v ? localStorage.setItem(PLUS_KEY, JSON.stringify(v)) : localStorage.removeItem(PLUS_KEY); } catch(e){} }
+function plusApi(dados){
+  const ses = plusSessao();
+  return fetch('api/plus', { method:'POST', headers:{ 'Content-Type':'application/json', ...(ses ? { Authorization:'Bearer ' + ses.token } : {}) },
+    body: JSON.stringify(dados) }).then(r => r.json().catch(() => ({ ok:false })).then(d => ({ ...d, status:r.status })));
+}
+let plusEmail = '';
+async function abrirPlus(){
+  const ses = plusSessao();
+  if (!ses){
+    plusEmail = S.conta && S.conta.includes('@') ? S.conta : '';
+    return abrir(`<h2>⭐ Tino Plus</h2>
+      <p class="note" style="margin:-4px 0 14px">Entre com o seu e-mail. Vamos enviar um código de 6 números para confirmar que é você.</p>
+      <div class="f"><label>E-mail</label><input id="plusEmail" type="email" inputmode="email" autocomplete="email" value="${esc(plusEmail)}" placeholder="seuemail@exemplo.com"></div>
+      <button class="btn pri" data-act="plusPedir">Enviar código</button>`);
+  }
+  abrir(`<h2>⭐ Tino Plus</h2><p class="note">Carregando…</p>`);
+  const d = await plusApi({ acao:'eu' }).catch(() => ({ ok:false }));
+  if (d.status === 401){ plusGuardar(null); return abrirPlus(); }
+  if (!d.ok) return abrir(`<h2>⭐ Tino Plus</h2><p class="note" style="margin:0 0 14px">Sem conexão com o servidor. Tente de novo em instantes.</p><button class="btn sec" data-act="fechar">Fechar</button>`);
+  const c = d.conta;
+  abrir(`<h2>⭐ Tino Plus</h2>
+    <p class="note" style="margin:-4px 0 14px">Conectado como <b>${esc(c.email)}</b>.</p>
+    <div class="ind-cod"><small>Seu plano</small><b style="letter-spacing:0">${c.plusAtivo ? 'Plus ativo' : 'Gratuito'}</b></div>
+    ${c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : ''}
+    <p class="note" style="margin:0 0 14px">Em breve: seus dados em todos os aparelhos e o Tino no WhatsApp.</p>
+    <button class="btn sec" data-act="plusSair">Sair do Plus neste aparelho</button>`);
+}
+function plusPedir(btn){
+  plusEmail = document.getElementById('plusEmail').value.trim().toLowerCase();
+  if (!/^\S+@\S+\.\S+$/.test(plusEmail)) return toast('Confira o e-mail digitado');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  plusApi({ acao:'pedir', email:plusEmail }).then(d => {
+    if (!d.ok){ btn.disabled = false; btn.textContent = 'Enviar código'; return toast(d.erro || 'Não foi possível enviar'); }
+    abrir(`<h2>Digite o código</h2>
+      <p class="note" style="margin:-4px 0 14px">Enviamos um código de 6 números para <b>${esc(plusEmail)}</b>. Confira também a caixa de spam.</p>
+      ${d.codigoTeste ? `<p class="note" style="margin:0 0 12px">🧪 Teste: o código é <b>${d.codigoTeste}</b>${d.enviado ? ' (e o e-mail foi enviado)' : ' (o e-mail não foi enviado)'}.</p>` : ''}
+      <div class="f"><label>Código</label><input id="plusCodigo" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" style="font-size:24px;letter-spacing:.3em;text-align:center"></div>
+      <button class="btn pri" data-act="plusEntrar">Entrar</button>
+      <button class="link-sutil" data-act="plus">Usar outro e-mail ou reenviar</button>`);
+    setTimeout(() => { const el = document.getElementById('plusCodigo'); if (el) el.focus(); }, 250);
+  }).catch(() => { btn.disabled = false; btn.textContent = 'Enviar código'; toast('Sem conexão. Tente de novo.'); });
+}
+function plusEntrar(btn){
+  const codigo = document.getElementById('plusCodigo').value.replace(/\D/g, '');
+  if (codigo.length !== 6) return toast('Digite os 6 números');
+  btn.disabled = true; btn.textContent = 'Entrando…';
+  plusApi({ acao:'entrar', email:plusEmail, codigo, aparelho:idAparelho() }).then(d => {
+    if (!d.ok){ btn.disabled = false; btn.textContent = 'Entrar'; return toast(d.erro || 'Não foi possível entrar'); }
+    plusGuardar({ email:d.conta.email, token:d.token }); toast('Pronto, você entrou ✓'); abrirPlus();
+  }).catch(() => { btn.disabled = false; btn.textContent = 'Entrar'; toast('Sem conexão. Tente de novo.'); });
+}
+
 /* ---------- categorias do cliente ---------- */
 let catEd = null;   // categoria sendo criada/editada: { i (índice em S.catsExtras ou -1), emoji, ess }
 function abrirCategorias(){
@@ -2865,7 +2923,10 @@ function telaAjustes(){
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const tema = S.tema || 'auto';
-  return `<section class="card"><h3>Aparência</h3>
+  return `${TESTE ? `<section class="card"><h3>⭐ Tino Plus <small class="muted">(em construção)</small></h3>
+    <p class="note" style="margin:0 0 12px">${plusSessao() ? `Conectado como <b>${esc(plusSessao().email)}</b>.` : 'Entre com o seu e-mail para testar o login do Plus.'}</p>
+    <button class="btn sec" data-act="plus">${plusSessao() ? 'Ver minha conta Plus' : 'Entrar no Tino Plus'}</button></section>` : ''}
+  <section class="card"><h3>Aparência</h3>
     <div class="temas">${[['auto','Automático'],['claro','☀️ Claro'],['escuro','🌙 Escuro']].map(([v,l])=>`<button class="${tema===v?'on':''}" data-act="tema" data-v="${v}">${l}</button>`).join('')}</div>
     <p class="note">Automático segue o modo claro/escuro do seu celular.</p></section>
   <section class="card"><h3>Perfil</h3>
@@ -3194,6 +3255,10 @@ document.addEventListener('click', e=>{
   if (a==='npsNota'){ npsNota(+t.dataset.v); return; }
   if (a==='npsEnviar'){ enviarNps(); return; }
   if (a==='npsDepois'){ S.nps = { ...(S.nps||{}), vezes:((S.nps||{}).vezes||0)+1, depoisDe: new Date(Date.now()+14*864e5).toISOString() }; salvar(); fechar(); return; }
+  if (a==='plus'){ abrirPlus(); return; }
+  if (a==='plusPedir'){ plusPedir(t); return; }
+  if (a==='plusEntrar'){ plusEntrar(t); return; }
+  if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
   if (a==='indique'){ abrirIndique(); return; }
   if (a==='indiqueOcultar'){ S.indiqueOculto = true; salvar(); render(); return; }
   if (a==='indiqueEnviar'){ const txt = textoConvite();
@@ -3731,7 +3796,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','indique','indiqueUsar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['plus','plusPedir','plusEntrar','excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','indique','indiqueUsar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
