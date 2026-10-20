@@ -24,7 +24,24 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 48;
+const APP_VERSAO = 49;
+// Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
+(function(){
+  const vistos = new Set();
+  function enviar(msg, onde){
+    try {
+      msg = String(msg || '').slice(0, 200); onde = String(onde || '').slice(0, 120);
+      if (!msg || /^Script error\.?$/i.test(msg) || vistos.size >= 5 || vistos.has(msg + onde)) return;
+      vistos.add(msg + onde);
+      const ler = (f) => { try { return f(); } catch(e){ return ''; } };   // variáveis ainda não criadas quando o erro é bem no início
+      fetch('api/erros', { method:'POST', keepalive:true, headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+        msg, onde, versao:APP_VERSAO, tela:ler(() => aba), aparelho:ler(nomeAparelho), demo:!!ler(() => DEMO), teste:!!ler(() => TESTE) }) }).catch(() => {});
+    } catch(e){}
+  }
+  window.addEventListener('error', e => enviar(e.message, `${String(e.filename||'').split('/').pop()}:${e.lineno}:${e.colno}`));
+  window.addEventListener('unhandledrejection', e => { const r = e.reason;
+    enviar('Promise: ' + (r && r.message || r), r && r.stack ? (String(r.stack).split('\n').find(l => /\.js/.test(l)) || '').trim() : ''); });
+})();
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -35,6 +52,16 @@ const CATEGORIAS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','🍗 Alimentaç
 // Categorias que já vêm marcadas como essenciais ao lançar um gasto.
 const ESSENCIAIS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','⛽ Gasolina','🚗 Transporte','🏠 Casa','💊 Saúde','📚 Educação'];
 const CAT_CONTAS = '📄 Contas fixas';
+const EMOJIS_CAT = ['🐶','👶','💪','⚽','🎮','🍺','☕','🍕','💇','🚌','🛵','✈️','🎓','💻','🔧','🧹','🏋️','🎵','🎨','📷','🌱','⛪','💼','🏦','💳','🎟️','🚬','💐'];
+// Categorias do cliente: S.catsExtras = [{ c:'🐶 Cachorro', ess:false }] e S.catsOcultas = categorias do app que a pessoa escondeu.
+// "❓ Outros" fica sempre por último e nunca some. 'incluir' mantém na lista a categoria atual de um gasto, mesmo escondida.
+function catsVisiveis(incluir){
+  const oc = S.catsOcultas || [], l = CATEGORIAS.filter(c => c !== '❓ Outros' && !oc.includes(c)).concat((S.catsExtras||[]).map(x => x.c));
+  if (incluir && incluir !== '❓ Outros' && !l.includes(incluir)) l.push(incluir);
+  return l.concat(['❓ Outros']);
+}
+function todasCats(){ return CATEGORIAS.concat((S.catsExtras||[]).map(x => x.c)); }
+function ehEssencial(c){ return ESSENCIAIS.includes(c) || !!(S.catsExtras||[]).find(x => x.c === c && x.ess); }
 const FORMAS = ['Pix / Dinheiro','Débito','Crédito'];
 const TIPOS_RES = ['Reserva de emergência','Meta','Renda Fixa','Renda Variável','Outros'];
 const TIPOS_INVEST = ['Renda Fixa','Renda Variável','Outros'];
@@ -1095,7 +1122,7 @@ function abrirOrganizar(){
   abrir(`<h2>🧹 Organizar “Outros”</h2>
     <p class="note" style="margin:0 0 12px">Escolha a categoria de cada gasto. O Tino aprende e acerta sozinho na próxima vez que você escrever algo parecido.</p>
     <div class="org-lista">${gs.map(g => `<div class="org-item"><div class="org-t"><b>${esc(g.desc || 'Sem descrição')}</b><span class="num">${brl(g.valor)} · ${fmtData(g.data)}</span></div>
-      <div class="org-cats">${CATEGORIAS.filter(c => c !== OUTROS).map(c => `<button data-act="orgCat" data-id="${g.id}" data-c="${esc(c)}" title="${esc(nomeCat(c))}">${emojiCat(c)}<small>${esc(nomeCat(c))}</small></button>`).join('')}</div></div>`).join('')}</div>`);
+      <div class="org-cats">${catsVisiveis().filter(c => c !== OUTROS).map(c => `<button data-act="orgCat" data-id="${g.id}" data-c="${esc(c)}" title="${esc(nomeCat(c))}">${emojiCat(c)}<small>${esc(nomeCat(c))}</small></button>`).join('')}</div></div>`).join('')}</div>`);
 }
 
 /* ---------- lista de espera: Tino Conectado ----------
@@ -1205,7 +1232,7 @@ function talvezPedirDepoimento(){
 }
 let depoNotaSel = 0;
 function abrirDepoimento(automatico){
-  depoNotaSel = 0;
+  depoNotaSel = 0; if (automatico) pediuOpiniao = true;
   const primeiro = (S.perfil.nome||'').trim().split(/\s+/)[0] || '';
   abrir(`<h2>💬 Está gostando do Tino?</h2>
     <p class="note" style="margin:0 0 12px">Sua opinião ajuda a melhorar o app e a mostrar para outras pessoas como ele funciona na prática.</p>
@@ -1235,6 +1262,100 @@ function enviarDepoimento(){
       S.depo = { ...(S.depo||{}), enviado:true }; salvar(); fechar();
       toast(depoNotaSel >= 4 ? 'Obrigado pelo depoimento! 💚' : 'Obrigado! Vamos usar sua opinião para melhorar.'); })
     .catch(() => { btn.disabled = false; btn.textContent = 'Enviar'; toast('Não foi possível enviar. Confira a internet e tente de novo.'); });
+}
+
+/* ---------- pesquisa de satisfação (NPS) ----------
+   Pergunta uma vez, depois de 14 dias desde o primeiro lançamento e com pelo menos 5 dias de uso.
+   Nunca junto com o pedido de depoimento. "Agora não" pergunta de novo em 14 dias, no máximo mais uma vez. */
+let pediuOpiniao = false, npsNotaSel = null;
+function talvezPedirNps(){
+  if (DEMO || !S.liberado || !S.perfil.ok || !S.conta || !navigator.onLine || ocupado() || pediuOpiniao) return;
+  if (document.getElementById('conq')) return setTimeout(talvezPedirNps, 5000);
+  const n = S.nps || {};
+  if (n.enviado || (n.vezes||0) >= 2) return;
+  if (n.depoisDe && Date.now() < new Date(n.depoisDe).getTime()) return;
+  const dias = [...new Set(S.diasAtivos||[])].sort();
+  if (dias.length < 5 || diasDesde(dias[0]) < 14) return;
+  pediuOpiniao = true; abrirNps();
+}
+function abrirNps(){
+  npsNotaSel = null;
+  abrir(`<h2>Uma pergunta rápida</h2>
+    <p class="note" style="margin:0 0 14px">De 0 a 10, quanto você indicaria o Tino para um amigo ou alguém da família?</p>
+    <div class="nps" role="radiogroup" aria-label="Sua nota de 0 a 10">${[...Array(11).keys()].map(n=>`<button data-act="npsNota" data-v="${n}" aria-label="Nota ${n}">${n}</button>`).join('')}</div>
+    <div class="nps-leg"><span>Nada provável</span><span>Muito provável</span></div>
+    <div class="f" id="npsMais" hidden><label id="npsLabel"></label><textarea id="npsTexto" rows="3" maxlength="600"></textarea></div>
+    <p class="note" id="npsAjuda" hidden style="margin:-4px 0 12px">Travou em alguma coisa? <button class="link-sutil" data-act="ajuda" style="display:inline;padding:0;margin:0">Veja a central de ajuda</button> ou fale com a gente.</p>
+    <button class="btn pri" data-act="npsEnviar">Enviar</button>
+    <button class="btn sec" data-act="npsDepois">Agora não</button>`);
+}
+function npsNota(n){
+  npsNotaSel = n;
+  document.querySelectorAll('.nps button').forEach((b,i) => b.classList.toggle('on', i === n));
+  const t = n >= 9 ? ['O que você mais gosta no Tino?', 'Ex.: saber quanto posso gastar por dia'] : n >= 7 ? ['O que faria você dar 10?', 'Conte o que falta para o Tino ser perfeito para você'] : ['O que podemos melhorar?', 'Conte o que não funcionou bem ou o que ficou difícil'];
+  document.getElementById('npsMais').hidden = false;
+  document.getElementById('npsLabel').textContent = t[0] + ' (opcional)';
+  document.getElementById('npsTexto').placeholder = t[1];
+  document.getElementById('npsAjuda').hidden = n > 6;
+}
+function enviarNps(){
+  if (npsNotaSel === null) return toast('Toque em um número de 0 a 10');
+  const btn = document.querySelector('[data-act="npsEnviar"]'); btn.disabled = true; btn.textContent = 'Enviando…';
+  fetch('api/nps', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({
+    conta:S.conta, aparelho:idAparelho(), nota:npsNotaSel, texto:document.getElementById('npsTexto').value.trim(), versao:APP_VERSAO }) })
+    .then(r => { if (!r.ok) throw 0;
+      S.nps = { ...(S.nps||{}), enviado:true, nota:npsNotaSel }; salvar(); fechar();
+      toast(npsNotaSel >= 9 ? 'Obrigado! Ficamos muito felizes 💚' : 'Obrigado! Vamos usar sua resposta para melhorar.'); })
+    .catch(() => { btn.disabled = false; btn.textContent = 'Enviar'; toast('Não foi possível enviar. Confira a internet e tente de novo.'); });
+}
+
+/* ---------- categorias do cliente ---------- */
+let catEd = null;   // categoria sendo criada/editada: { i (índice em S.catsExtras ou -1), emoji, ess }
+function abrirCategorias(){
+  const ex = S.catsExtras || [], oc = S.catsOcultas || [];
+  abrir(`<h2>🏷️ Minhas categorias</h2>
+    <p class="note" style="margin:-6px 0 14px">As suas aparecem junto com as do app na hora de lançar um gasto.</p>
+    ${ex.length ? `<div class="cats-lista">${ex.map((x,i)=>`<button class="cat-item" data-act="catEditar" data-i="${i}"><span class="e">${emojiCat(x.c)}</span><span class="n">${esc(nomeCat(x.c))}</span>${x.ess?'<span class="tag auto">essencial</span>':''}<span class="muted">Editar ›</span></button>`).join('')}</div>` : '<p class="note" style="margin:0 0 12px">Você ainda não criou nenhuma.</p>'}
+    <button class="btn pri" data-act="catNova">+ Nova categoria</button>
+    <h3 style="margin:22px 0 6px">Categorias do app</h3>
+    <p class="note" style="margin:0 0 8px">Desligue as que você não usa. Os gastos antigos continuam como estão.</p>
+    ${CATEGORIAS.filter(c => c !== OUTROS).map(c=>`<div class="switch"><span>${emojiCat(c)} ${esc(nomeCat(c))}</span><button class="tg ${oc.includes(c)?'':'on'}" data-act="catOcultar" data-c="${esc(c)}" aria-label="Mostrar ${esc(nomeCat(c))}"></button></div>`).join('')}
+    <p class="note">❓ Outros fica sempre disponível.</p>`);
+}
+function abrirCatForm(i){
+  const x = i >= 0 ? S.catsExtras[i] : null;
+  catEd = { i, emoji: x ? emojiCat(x.c) : EMOJIS_CAT[0], ess: x ? !!x.ess : false };
+  abrir(`<h2>${x ? 'Editar categoria' : 'Nova categoria'}</h2>
+    <div class="f"><label>Nome</label><input id="catNome" maxlength="20" value="${x ? esc(nomeCat(x.c)) : ''}" placeholder="Ex.: Cachorro, Filhos, Academia"></div>
+    <div class="f"><label>Ícone</label><div class="emojis-cat">${EMOJIS_CAT.map(e=>`<button type="button" class="${e===catEd.emoji?'on':''}" data-act="catEmoji" data-e="${e}">${e}</button>`).join('')}</div></div>
+    <div class="switch"><span>Gasto essencial <small class="muted">(contas, saúde, necessidade)</small></span><button class="tg ${catEd.ess?'on':''}" data-act="catEss" aria-label="Gasto essencial"></button></div>
+    <button class="btn pri" data-act="catSalvar" style="margin-top:14px">Salvar</button>
+    ${x ? '<button class="btn sec" data-act="catApagar">Apagar categoria</button>' : ''}
+    <button class="btn sec" data-act="categorias">Voltar</button>`);
+  if (!x) setTimeout(() => { const el = document.getElementById('catNome'); if (el) el.focus(); }, 250);
+}
+// Troca a categoria em todos os gastos e no orçamento (ao renomear ou apagar).
+function trocarCategoria(de, para){
+  Object.values(S.meses).forEach(M => M.gastos.forEach(g => { if (g.cat === de) g.cat = para; }));
+  if (S.orcamentos[de] != null){ if (para !== OUTROS) S.orcamentos[para] = S.orcamentos[de]; delete S.orcamentos[de]; }
+}
+function salvarCatForm(){
+  const nome = document.getElementById('catNome').value.trim().replace(/\s+/g, ' ');
+  if (nome.length < 2) return toast('Dê um nome para a categoria');
+  const c = catEd.emoji + ' ' + nome.charAt(0).toUpperCase() + nome.slice(1);
+  S.catsExtras = S.catsExtras || [];
+  const antiga = catEd.i >= 0 ? S.catsExtras[catEd.i].c : null;
+  if (todasCats().some(k => k !== antiga && normTxt(nomeCat(k)) === normTxt(nomeCat(c)))) return toast('Já existe uma categoria com esse nome');
+  if (antiga){ S.catsExtras[catEd.i] = { c, ess:catEd.ess }; if (antiga !== c) trocarCategoria(antiga, c); }
+  else S.catsExtras.push({ c, ess:catEd.ess });
+  salvar(); render(); abrirCategorias(); toast(antiga ? 'Categoria atualizada ✓' : 'Categoria criada ✓');
+}
+function apagarCatForm(){
+  const c = S.catsExtras[catEd.i].c;
+  let n = 0; Object.values(S.meses).forEach(M => M.gastos.forEach(g => { if (g.cat === c) n++; }));
+  if (!confirm(`Apagar a categoria ${nomeCat(c)}?${n ? ` ${n} gasto${n>1?'s':''} vão para ❓ Outros.` : ''}`)) return;
+  trocarCategoria(c, OUTROS); S.catsExtras.splice(catEd.i, 1);
+  salvar(); render(); abrirCategorias(); toast('Categoria apagada');
 }
 
 /* ---------- sequência e conquistas ---------- */
@@ -1537,6 +1658,8 @@ function categorizar(texto){
   let melhor = null;
   Object.values(S.meses).forEach(M => M.gastos.forEach(g => { const d = normTxt(g.desc); if (d.length>=3 && temPalavra(tt, d) && (!melhor || d.length > melhor.n.length)) melhor = { n:d, cat:g.cat, desc:g.desc }; }));
   if (melhor) return { cat:melhor.cat, desc:melhor.desc };
+  const minha = (S.catsExtras||[]).find(x => { const n = normTxt(nomeCat(x.c)); return n.length >= 3 && temPalavra(tt, n); });
+  if (minha) return { cat:minha.c };
   let kw = null;
   PALAVRAS_CAT.forEach(([cat, ws]) => ws.forEach(w => { if (temPalavra(tt, w) && (!kw || w.length > kw.w.length)) kw = { w, cat }; }));
   return { cat: kw ? kw.cat : null };
@@ -1765,7 +1888,7 @@ function prepararImportacao(){
 function desenharImportacao(){
   const it = imp.itens, sel = it.filter(x=>x.sel);
   const datas = it.map(x=>x.data).sort();
-  const opts = (c) => CATEGORIAS.map(k=>`<option value="${esc(k)}" ${k===c?'selected':''}>${k}</option>`).join('');
+  const opts = (c) => catsVisiveis(c).map(k=>`<option value="${esc(k)}" ${k===c?'selected':''}>${k}</option>`).join('');
   abrir(`<h2>📥 Importar extrato</h2>
     <p class="note" style="margin:-6px 0 12px">${it.length} transações de ${fmtData(datas[0])}/${datas[0].slice(2,4)} a ${fmtData(datas[datas.length-1])}/${datas[datas.length-1].slice(2,4)}. Confira as categorias e desmarque o que não quiser.</p>
     <div class="seg sm"><button type="button" class="${imp.modo==='conta'?'on':''}" data-impmodo="conta">Conta (débito/Pix)</button><button type="button" class="${imp.modo==='cartao'?'on':''}" data-impmodo="cartao">Cartão de crédito</button></div>
@@ -1786,7 +1909,7 @@ function confirmarImportacao(){
     if (x.tipo === 'gastos'){
       const forma = imp.modo === 'cartao' ? 'Crédito' : /pix/i.test(x.original) ? 'Pix / Dinheiro' : 'Débito';
       const cartao = forma === 'Crédito' && cartaoPorId(imp.cartao) ? imp.cartao : undefined;
-      M.gastos.push({ id:uid(), cat:x.cat, forma, valor, data:x.data, essencial:ESSENCIAIS.includes(x.cat), desc:x.desc, parcelas:1, importado:true, cartao });
+      M.gastos.push({ id:uid(), cat:x.cat, forma, valor, data:x.data, essencial:ehEssencial(x.cat), desc:x.desc, parcelas:1, importado:true, cartao });
     } else M.entradas.push({ id:uid(), nome:x.desc, valor, data:x.data, importado:true });
   });
   S.novosDesdeBackup = (S.novosDesdeBackup||0) + sel.length; registrarDiaAtivo(); salvar();
@@ -1981,7 +2104,7 @@ function calcularDicas(){
   const y = hoje.getFullYear(), m = hoje.getMonth(), C = calc(y,m), d = hoje.getDate(), D = diasNoMes(y,m), frac = d / D;
   const base = []; for (let i=1; i<=6 && base.length<3; i++){ const o = somaMeses(y,m,-i); if (temDados(S.meses[key(o.y,o.m)])) base.push(calc(o.y,o.m)); }
   const dicas = [], pct = (a,b) => Math.round(Math.abs(a/b - 1) * 100);
-  const media = {}; if (base.length) CATEGORIAS.concat([CAT_CONTAS]).forEach(c => media[c] = soma(base, b=>b.cats[c]||0) / base.length);
+  const media = {}; if (base.length) todasCats().concat([CAT_CONTAS]).forEach(c => media[c] = soma(base, b=>b.cats[c]||0) / base.length);
   // 1-2. categorias acima/abaixo do normal para esta altura do mês
   if (base.length && frac >= 0.2) Object.entries(media).forEach(([c, md]) => {
     if (FIXAS.includes(c) || md < 50) return;
@@ -2689,6 +2812,9 @@ function telaAjustes(){
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
   <section class="card"><h3>Tela inicial</h3>
     <div class="switch"><span>Modo simples <small class="muted">(só o essencial na tela inicial)</small></span><button class="tg ${S.modoSimples?'on':''}" data-act="modoSimplesTg" aria-label="Modo simples"></button></div></section>
+  <section class="card"><h3>Categorias</h3>
+    <p class="note" style="margin:0 0 12px">Crie categorias do seu jeito (pet, filhos, academia…) e esconda as que você não usa.${(S.catsExtras||[]).length ? ` Você tem <b>${S.catsExtras.length}</b> categoria${S.catsExtras.length>1?'s':''} sua${S.catsExtras.length>1?'s':''}.` : ''}</p>
+    <button class="btn sec" data-act="categorias">🏷️ Minhas categorias</button></section>
   <section class="card"><h3>Personalidade do Tino</h3>
     <div class="temas">${[['gentil','🙂 Gentil'],['sincero','😏 Sincero']].map(([v,l])=>`<button class="${(S.tom||'gentil')===v?'on':''}" data-act="tom" data-v="${v}">${l}</button>`).join('')}</div>
     <p class="note">No modo sincero, as dicas ficam mais diretas e bem-humoradas.</p></section>
@@ -2775,7 +2901,7 @@ function abrirForm(tipo, id, mk, opcoes){
     abrir(`${topo}${it?'':blocoFrase()}<h2>${it?'Editar':'Novo'} gasto</h2>
       <div class="f"><input class="money num big" id="fValor" inputmode="decimal" placeholder="R$ 0,00" aria-label="Valor" value="${moneyVal(it&&it.valor)}"></div>
       ${rec.length?`<div class="f"><label>Usados com frequência</label><div class="chips rec">${rec.map((g,i)=>`<button type="button" data-rec="${i}">${emojiCat(g.cat)} ${esc(g.desc||nomeCat(g.cat))}</button>`).join('')}</div></div>`:''}
-      <div class="f"><label>Categoria</label><div class="catgrid">${CATEGORIAS.map(c=>`<button type="button" class="${c===form.v.cat?'on':''}" data-catsel="${esc(c)}"><span>${emojiCat(c)}</span>${esc(nomeCat(c))}</button>`).join('')}</div></div>
+      <div class="f"><label>Categoria</label><div class="catgrid">${catsVisiveis(form.v.cat).map(c=>`<button type="button" class="${c===form.v.cat?'on':''}" data-catsel="${esc(c)}"><span>${emojiCat(c)}</span>${esc(nomeCat(c))}</button>`).join('')}</div></div>
       <div class="f"><label>Forma de pagamento</label>${chips('forma',FORMAS,form.v.forma)}</div>
       <div class="f" id="boxCartao" ${form.v.forma==='Crédito' && (S.cartoes||[]).length?'':'hidden'}><label>Cartão</label>${chips('cartao', (S.cartoes||[]).map(c=>c.nome), (cartaoPorId(form.v.cartao)||{}).nome)}</div>
       <div class="f" id="boxParc" ${form.v.forma==='Crédito'?'':'hidden'}><label>Parcelas</label><select id="fParc">${Array.from({length:24},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===form.v.parcelas?'selected':''}>${n===1?'À vista (1x)':n+'x'}</option>`).join('')}</select><div class="note" id="parcInfo"></div></div>
@@ -2830,7 +2956,7 @@ function infoParcelas(){
 function selecionarCat(c){
   form.v.cat = c;
   $sh.querySelectorAll('[data-catsel]').forEach(b=>b.classList.toggle('on', b.dataset.catsel===c));
-  if (!form.id){ form.v.essencial = ESSENCIAIS.includes(c);
+  if (!form.id){ form.v.essencial = ehEssencial(c);
     $sh.querySelectorAll('[data-chips="essencial"] button').forEach(b=>b.classList.toggle('on', b.dataset.v===(form.v.essencial?'Sim':'Não'))); }
 }
 
@@ -2887,14 +3013,16 @@ function avisoOrcamento(c){
 }
 
 // Tela de orçamentos: um campo por categoria, com a média dos últimos 3 meses como referência.
+let orcCats = [];
 function abrirOrcamentos(){
   const medias = {};
-  CATEGORIAS.forEach(c=>{ let t=0,n=0; for (let i=1;i<=3;i++){ const o=somaMeses(cur.y,cur.m,-i), v=calc(o.y,o.m).cats[c]||0; if (temDados(S.meses[key(o.y,o.m)])){ t+=v; n++; } } medias[c] = n ? t/n : 0; });
+  orcCats = catsVisiveis(); Object.keys(S.orcamentos).forEach(c => { if (!orcCats.includes(c)) orcCats.push(c); });   // não perde limite de categoria escondida
+  orcCats.forEach(c=>{ let t=0,n=0; for (let i=1;i<=3;i++){ const o=somaMeses(cur.y,cur.m,-i), v=calc(o.y,o.m).cats[c]||0; if (temDados(S.meses[key(o.y,o.m)])){ t+=v; n++; } } medias[c] = n ? t/n : 0; });
   const algumaMedia = Object.values(medias).some(v=>v>0);
   abrir(`<h2>Orçamento mensal por categoria</h2>
     <p class="note" style="margin:-6px 0 14px">Deixe em branco as categorias sem limite.${algumaMedia?' Abaixo de cada uma, a sua média dos últimos 3 meses.':''}</p>
     ${algumaMedia?'<button class="btn sec" data-act="orcMedia" style="margin-bottom:14px">Preencher com as minhas médias</button>':''}
-    <div class="orclist">${CATEGORIAS.map((c,i)=>`<div class="orc"><span class="lbl">${emojiCat(c)} ${esc(nomeCat(c))}${medias[c]?`<small>média ${brl0(medias[c])}</small>`:''}</span>
+    <div class="orclist">${orcCats.map((c,i)=>`<div class="orc"><span class="lbl">${emojiCat(c)} ${esc(nomeCat(c))}${medias[c]?`<small>média ${brl0(medias[c])}</small>`:''}</span>
       <input class="num" inputmode="decimal" data-orc="${i}" data-media="${Math.round(medias[c])}" placeholder="—" value="${S.orcamentos[c]?moneyVal(S.orcamentos[c]):''}"></div>`).join('')}</div>
     <div class="switch" style="margin-top:16px"><span><b>Acumular para o mês seguinte</b><br><small class="note">O que sobrar numa categoria aumenta o limite do mês seguinte. O que estourar, diminui.</small></span><button class="tg ${S.orcAcumular?'on':''}" data-act="orcAcum" aria-label="Acumular sobras"></button></div>
     <button class="btn pri" data-act="salvarOrc" style="margin-top:14px">Salvar orçamentos</button>`);
@@ -2975,7 +3103,7 @@ document.addEventListener('click', e=>{
   if (a==='desligarRenda'){ S.rendaVariavel = { ...(S.rendaVariavel||{}), ativo:false }; salvar(); fechar(); render(); toast('Renda variável desligada'); return; }
   if (a==='guardarExcedente'){ const v = +t.dataset.v; abrirForm('reservas'); setTimeout(() => { const i = document.getElementById('fValor'); if (i) i.value = moneyVal(v); }, 60); return; }
   if (a==='organizar'){ abrirOrganizar(); return; }
-  if (a==='orgCat'){ const g = mes(cur.y,cur.m).gastos.find(x => x.id === t.dataset.id); if (g){ g.cat = t.dataset.c; g.essencial = ESSENCIAIS.includes(g.cat); salvar(); } abrirOrganizar(); return; }
+  if (a==='orgCat'){ const g = mes(cur.y,cur.m).gastos.find(x => x.id === t.dataset.id); if (g){ g.cat = t.dataset.c; g.essencial = ehEssencial(g.cat); salvar(); } abrirOrganizar(); return; }
   if (a==='colar'){ abrirColar(); return; }
   if (a==='colarLancar'){ lancarTexto(document.getElementById('cTexto').value); return; }
   if (a==='colarLer'){ navigator.clipboard.readText().then(x => { document.getElementById('cTexto').value = x; if (interpretarTextoBanco(x)) lancarTexto(x); else toast('Não encontrei um valor (R$) no que você copiou'); }).catch(() => toast('Não consegui ler. Toque no campo e use Colar.')); return; }
@@ -2997,6 +3125,19 @@ document.addEventListener('click', e=>{
       .catch(e => { t.disabled = false; t.textContent = '☁️ Fazer backup na nuvem agora'; toast(e.message === 'grande' ? 'Seus dados são grandes demais para a nuvem. Use o backup em arquivo.' : 'Não foi possível enviar. Confira a internet.'); }); return; }
   if (a==='ajudaTour'){ fechar(); setTimeout(iniciarTour, 250); return; }
   if (a==='depoimento'){ abrirDepoimento(); return; }
+  if (a==='npsNota'){ npsNota(+t.dataset.v); return; }
+  if (a==='npsEnviar'){ enviarNps(); return; }
+  if (a==='npsDepois'){ S.nps = { ...(S.nps||{}), vezes:((S.nps||{}).vezes||0)+1, depoisDe: new Date(Date.now()+14*864e5).toISOString() }; salvar(); fechar(); return; }
+  if (a==='categorias'){ abrirCategorias(); return; }
+  if (a==='catNova'){ abrirCatForm(-1); return; }
+  if (a==='catEditar'){ abrirCatForm(+t.dataset.i); return; }
+  if (a==='catEmoji'){ catEd.emoji = t.dataset.e; $sh.querySelectorAll('[data-act="catEmoji"]').forEach(b => b.classList.toggle('on', b === t)); return; }
+  if (a==='catEss'){ catEd.ess = !catEd.ess; t.classList.toggle('on', catEd.ess); return; }
+  if (a==='catSalvar'){ salvarCatForm(); return; }
+  if (a==='catApagar'){ apagarCatForm(); return; }
+  if (a==='catOcultar'){ const c = t.dataset.c, oc = S.catsOcultas = S.catsOcultas || [];
+    if (oc.includes(c)) oc.splice(oc.indexOf(c), 1); else oc.push(c);
+    t.classList.toggle('on', !oc.includes(c)); salvar(); return; }
   if (a==='depoNota'){ depoNota(+t.dataset.v); return; }
   if (a==='depoEnviar'){ enviarDepoimento(); return; }
   if (a==='depoDepois'){ S.depo = { ...(S.depo||{}), vezes:((S.depo||{}).vezes||0)+1, depoisDe: new Date(Date.now()+10*864e5).toISOString() }; salvar(); fechar(); return; }
@@ -3027,7 +3168,7 @@ document.addEventListener('click', e=>{
   else if (a==='orcamentos'){ abrirOrcamentos(); }
   else if (a==='orcMedia'){ $sh.querySelectorAll('[data-orc]').forEach(i=>{ if (!i.value && +i.dataset.media) i.value = (+i.dataset.media).toLocaleString('pt-BR'); }); }
   else if (a==='salvarOrc'){
-    const novo = {}; $sh.querySelectorAll('[data-orc]').forEach(i=>{ const v = parseValor(i.value); if (v>0) novo[CATEGORIAS[+i.dataset.orc]] = v; });
+    const novo = {}; $sh.querySelectorAll('[data-orc]').forEach(i=>{ const v = parseValor(i.value); if (v>0) novo[orcCats[+i.dataset.orc]] = v; });
     S.orcamentos = novo; salvar(); fechar(); render(); toast('Orçamentos salvos ✓');
   }
   else if (a==='salvarOrcCat'){
@@ -3515,7 +3656,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
@@ -3530,6 +3671,7 @@ function iniciarApp(){
   mostrarNovidades();
   setTimeout(checarConquistas, 1200);
   setTimeout(talvezPedirDepoimento, 2500);
+  setTimeout(talvezPedirNps, 3500);
   setTimeout(backupAutomatico, 4000);
 }
 if (TESTE && !DEMO){

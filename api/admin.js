@@ -79,7 +79,19 @@ module.exports = async (req, res) => {
       let nuvem = 0, cursor = '0';
       do { const r = await redis('SCAN', cursor, 'MATCH', 'nuvem:*', 'COUNT', '1000'); cursor = String(r[0]); nuvem += r[1].length; } while (cursor !== '0');
       const notas = Object.values(par(deps)).map((d) => { try { return JSON.parse(d).nota; } catch (e) { return 0; } }).filter(Boolean);
-      return res.json({ ok: true, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valorDia) }, anuncios: par(anuncios),
+      // Erros dos últimos 7 dias (somados) e respostas do NPS
+      const hojeBR = Date.now() - 3 * 3600e3, contagem = {};
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(hojeBR - i * 864e5).toISOString().slice(0, 10);
+        const e = par(await redis('HGETALL', 'erros:' + d));
+        for (const [id, n] of Object.entries(e)) contagem[id] = (contagem[id] || 0) + (+n || 0);
+      }
+      const infoErros = par(await redis('HGETALL', 'erros:info'));
+      const erros = Object.entries(contagem).map(([id, total]) => { let i = {}; try { i = JSON.parse(infoErros[id] || '{}'); } catch (e) {} return { ...i, total }; })
+        .sort((x, y) => y.total - x.total).slice(0, 20);
+      const nps = Object.entries(par(await redis('HGETALL', 'nps'))).map(([conta, v]) => { try { return { conta, ...JSON.parse(v) }; } catch (e) { return null; } }).filter(Boolean)
+        .sort((x, y) => (y.em || '').localeCompare(x.em || ''));
+      return res.json({ ok: true, erros, nps, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valorDia) }, anuncios: par(anuncios),
         totais: { lista: nLista, push: nPush, nuvem, depoimentos: notas.length, notaMedia: notas.length ? notas.reduce((a, b) => a + b, 0) / notas.length : null } });
     }
     if (acao === 'lista') {

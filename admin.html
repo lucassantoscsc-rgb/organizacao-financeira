@@ -38,6 +38,8 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
 .dep .n{color:var(--muted);font-size:13px}
 .dep .acts{display:flex;gap:6px;margin-top:8px}
 .tag.ok{background:#e6faf6;color:var(--good)}.tag.no{background:#f0f2f2;color:var(--muted)}
+.tag.ruim{background:#fdecec;color:#b42318}
+.lista-erros code{font-size:13px;word-break:break-word;background:#f0f2f2;padding:1px 5px;border-radius:5px}
 #msg{color:var(--bad);font-size:14px;margin-top:8px}
 main{max-width:760px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px}
@@ -164,6 +166,9 @@ function desenharMetricas(){
   const antigos = ativaram.filter(p => p.ativouEm && !desde(p.ativouEm, 30)), ret = antigos.filter(p => desde(p.visto, 7)).length;
   const apar = ativaram.reduce((a,p)=>a+p.apar,0), inst = ativaram.reduce((a,p)=>a+p.inst,0), ios = ativaram.reduce((a,p)=>a+p.ios,0), andr = ativaram.reduce((a,p)=>a+p.android,0);
   const T = met.totais;
+  // NPS = % de promotores (9–10) − % de detratores (0–6)
+  const N = met.nps || [], prom = N.filter(x => x.nota >= 9).length, detr = N.filter(x => x.nota <= 6).length;
+  const npsVal = N.length ? Math.round((prom - detr) / N.length * 100) : null;
   const k = (rot, val, sub, cls) => `<div class="kpi ${cls||''}"><span>${rot}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`;
   // gráfico de vendas dos últimos 30 dias
   const dias = []; for (let i = 29; i >= 0; i--) dias.push(menosDias(hoje, i));
@@ -183,6 +188,7 @@ function desenharMetricas(){
     <div class="kpis">
       ${k('Reembolsos', reemb, comprasReg ? pct(reemb, comprasReg) + ' das compras registradas' : 'desde 20/10', reemb && comprasReg && reemb/comprasReg >= .05 ? 'ruim' : '')}
       ${k('Chargebacks', charg, 'desde 20/10', charg ? 'ruim' : '')}
+      ${k('NPS', npsVal === null ? '—' : npsVal, N.length ? `${N.length} resposta${N.length===1?'':'s'} · meta ≥ 50` : 'aparece após 14 dias de uso', npsVal === null ? '' : npsVal >= 50 ? 'bom' : npsVal < 0 ? 'ruim' : '')}
       ${k('Nota dos depoimentos', T.notaMedia ? T.notaMedia.toFixed(1).replace('.',',') + ' ★' : '—', `${T.depoimentos} avaliaç${T.depoimentos===1?'ão':'ões'}`)}
     </div>
     <div class="secao">Uso do app</div>
@@ -201,10 +207,30 @@ function desenharMetricas(){
       ${k('Backup na nuvem', T.nuvem, pct(T.nuvem, ativaram.length) + ' de quem ativou')}
       ${k('Lista de espera', T.lista, 'Tino Conectado')}
     </div>
+    ${blocoNps(N, prom, detr)}
+    ${blocoErros(met.erros || [])}
     <p class="aviso">Vendas por dia contam quem tem acesso hoje (compras reembolsadas saem da contagem). Reembolsos e chargebacks passaram a ser registrados em 20/10/2026. "Ativo" = abriu o app com internet no período (o app confere o acesso uma vez por dia).</p>`;
 }
 document.addEventListener('input', e => { if (e.target.id === 'preco' || e.target.id === 'taxa') desenharMetricas(); });
 try { const p = localStorage.getItem('admPreco'), tx = localStorage.getItem('admTaxa'); setTimeout(() => { if (p) document.getElementById('preco').value = p; if (tx) document.getElementById('taxa').value = tx; }, 0); } catch(e){}
+
+/* Pesquisa NPS: as respostas mais recentes. Quem deu 0 a 6 aparece com o e-mail para você chamar. */
+function blocoNps(N, prom, detr){
+  if (!N.length) return '';
+  const neutros = N.length - prom - detr, grupo = (n) => n >= 9 ? ['ok','promotor'] : n >= 7 ? ['no','neutro'] : ['ruim','detrator'];
+  return `<div class="secao">Satisfação (NPS)</div>
+    <p class="aviso" style="margin-top:0">${prom} promotor${prom===1?'':'es'} (9–10) · ${neutros} neutro${neutros===1?'':'s'} (7–8) · ${detr} detrator${detr===1?'':'es'} (0–6)</p>
+    <div class="lista-nps">${N.slice(0, 30).map(x => { const [c, rot] = grupo(x.nota);
+      return `<div class="item"><span><b>${x.nota}</b> <span class="tag ${c}">${rot}</span> ${x.texto ? esc(x.texto) : '<span class="n">sem comentário</span>'}</span>
+        <span class="n">${x.nota <= 6 ? esc(x.conta) + ' · ' : ''}${data(x.em)} · v${x.versao||'?'}</span></div>`; }).join('')}</div>`;
+}
+/* Erros que aconteceram no app dos clientes nos últimos 7 dias, do mais frequente para o menos. */
+function blocoErros(E){
+  return `<div class="secao">🐞 Erros do app (7 dias)</div>
+    ${E.length ? `<div class="lista-erros">${E.map(x => `<div class="item"><span><b>${x.total}×</b> <code>${esc(x.msg)}</code>${x.teste ? ' <span class="tag no">teste</span>' : x.demo ? ' <span class="tag no">demo</span>' : ''}</span>
+      <span class="n">${esc(x.onde || 'sem local')} · tela ${esc(x.tela || '?')} · v${x.versao||'?'} · ${esc(x.aparelho || '')} · último ${data(x.ultima)}</span></div>`).join('')}</div>
+      <p class="aviso">Copie a mensagem e o local e me mande que eu corrijo.</p>` : '<p class="aviso" style="margin-top:0">Nenhum erro registrado. 🎉</p>'}`;
+}
 
 /* Anúncios: gasto do dia (digitado) × vendas do dia (Cakto) → custo por venda, ROAS e lucro.
    Custo por venda bom = abaixo de 60% do preço líquido (regra do plano de crescimento). */
