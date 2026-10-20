@@ -48,6 +48,11 @@ function novoEstado(){
 }
 // Modo demonstração (/demo ou ?demo): dados de exemplo, nada é salvo e os dados reais do aparelho não são tocados.
 const DEMO = /\/demo\/?$/.test(location.pathname) || new URLSearchParams(location.search).has('demo');
+// Endereço de teste: as versões de teste da Vercel (que já exigem login na Vercel) e o teste local.
+// Lá o app não pede a liberação de acesso, para testar como cliente novo sem gastar vagas de aparelho.
+// No endereço oficial (organizacao-financeira-seven.vercel.app) nada muda.
+const TESTE = /-lucas-santos-projects4\.vercel\.app$/.test(location.hostname) || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+if (TESTE && !DEMO) CONFIG.exigirCodigo = false;
 const LINK_COMPRA = 'https://planilhadeorganizacaofinanceira.online';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
@@ -3526,6 +3531,18 @@ function iniciarApp(){
   setTimeout(checarConquistas, 1200);
   setTimeout(talvezPedirDepoimento, 2500);
   setTimeout(backupAutomatico, 4000);
+}
+if (TESTE && !DEMO){
+  document.body.classList.add('demo');
+  const barra = document.createElement('div'); barra.id = 'demoBar'; barra.className = 'teste';
+  barra.innerHTML = `<span>🧪 <b>Endereço de teste</b> · v${APP_VERSAO}</span><a href="#" id="recomecarTeste">Recomeçar como cliente novo</a>`;
+  document.body.appendChild(barra);
+  document.getElementById('recomecarTeste').addEventListener('click', e => {
+    e.preventDefault();
+    if (!confirm('Apagar os dados deste teste e começar do zero, como um cliente novo?')) return;
+    try { Object.keys(localStorage).filter(k => k.startsWith('orgfin:')).forEach(k => localStorage.removeItem(k)); } catch(err){}
+    location.reload();
+  });
 }
 if (DEMO){
   const salvo = S;   // mantém só preferências visuais do aparelho
