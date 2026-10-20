@@ -1486,7 +1486,9 @@ function montar(mapa, base){
   return est;
 }
 function hashTxt(t){ let h = 2166136261; for (let i = 0; i < t.length; i++){ h ^= t.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36) + t.length.toString(36); }
-const hashVal = (v) => hashTxt(JSON.stringify(v));
+// O banco devolve os campos em outra ordem: o hash ordena as chaves para comparar só o conteúdo.
+const jsonOrdenado = (v) => JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.keys(x).sort().reduce((o, kk) => (o[kk] = x[kk], o), {}) : x);
+const hashVal = (v) => hashTxt(jsonOrdenado(v));
 function syncEstado(){ const ses = plusSessao(); if (!ses) return null; try { return JSON.parse(localStorage.getItem(SYNC_KEY(ses.email)) || 'null'); } catch(e){ return null; } }
 function syncGuardar(st){ const ses = plusSessao(); if (!ses) return; try { st ? localStorage.setItem(SYNC_KEY(ses.email), JSON.stringify(st)) : localStorage.removeItem(SYNC_KEY(ses.email)); } catch(e){ toast('Sem espaço no aparelho para a sincronização'); } }
 const syncLigada = () => !DEMO && !!plusSessao() && !!(syncEstado() || {}).ligado;
