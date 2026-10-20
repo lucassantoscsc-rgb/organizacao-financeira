@@ -1376,9 +1376,9 @@ function confirmarIndicacao(btn){
 const PLUS_KEY = 'orgfin:plus';
 function plusSessao(){ try { return JSON.parse(localStorage.getItem(PLUS_KEY) || 'null'); } catch(e){ return null; } }
 function plusGuardar(v){ try { v ? localStorage.setItem(PLUS_KEY, JSON.stringify(v)) : localStorage.removeItem(PLUS_KEY); } catch(e){} }
-function plusApi(dados){
+function plusApi(dados, rota){
   const ses = plusSessao();
-  return fetch('api/plus', { method:'POST', headers:{ 'Content-Type':'application/json', ...(ses ? { Authorization:'Bearer ' + ses.token } : {}) },
+  return fetch('api/' + (rota || 'plus'), { method:'POST', headers:{ 'Content-Type':'application/json', ...(ses ? { Authorization:'Bearer ' + ses.token } : {}) },
     body: JSON.stringify(dados) }).then(r => r.json().catch(() => ({ ok:false })).then(d => ({ ...d, status:r.status })));
 }
 let plusEmail = '';
@@ -1495,7 +1495,7 @@ function agendarSync(ms){
   if (aplicandoRemoto || !syncLigada()) return;
   clearTimeout(syncTimer); syncTimer = setTimeout(() => syncAgora(), ms ?? 4000);
 }
-const apiSync = (dados) => plusApi(dados).then(d => { if (d.status === 401){ plusGuardar(null); throw new Error('sessao'); } if (!d.ok) throw new Error(d.erro || 'falha'); return d; });
+const apiSync = (dados) => plusApi(dados, 'sync').then(d => { if (d.status === 401){ plusGuardar(null); throw new Error('sessao'); } if (!d.ok) throw new Error(d.erro || 'falha'); return d; });
 
 // Uma rodada: envia o que mudou (em lotes) e aplica o que chegou. modo 'juntar' (primeira vez com dados nos
 // dois lados: envia só os itens das listas e fica com as configurações da nuvem) ou 'nuvem' (usa só a nuvem).
