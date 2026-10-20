@@ -27,6 +27,7 @@ module.exports = async (req, res) => {
     const agora = new Date().toISOString();
     info[aparelho] = { ...(info[aparelho] || { em: u.em || agora }), visto: agora };
     if (nome) info[aparelho].nome = String(nome).slice(0, 60);
+    if (req.body.lancou) info[aparelho].lancou = true;   // já anotou algo no app (para medir a ativação)
 
     if (acao === 'remover') {
       const id = aparelhos.find((x) => apelido(x) === alvo);

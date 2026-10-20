@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 47;
+const APP_VERSAO = 48;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -842,7 +842,7 @@ function heroResumo(C){
   return `<section class="card hero hero2">
     <div class="h2-lbl"><span>Pode gastar hoje</span>${st ? `<span class="st ${st[0]}">${st[1]}</span>` : ''}</div>
     <div class="big num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</div>
-    <div class="h2-sub num">${livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>
+    <div class="h2-sub num">${C.entradas <= 0 ? 'Cadastre o que entra no mês (salário, renda) e o Tino calcula para você.' : livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>
     ${base > 0 ? `<div class="ritmo" role="img" aria-label="Gastos do dia a dia ${Math.round(usado)}% do disponível, mês ${Math.round(passou)}% concluído">
       <div class="ritmo-t"><span class="ritmo-f ${st?st[0]:''}" style="width:${usado}%"></span><span class="ritmo-m" style="left:${passou}%"></span></div>
       <div class="ritmo-l"><span>Gastos do dia a dia <b>${Math.round(usado)}%</b></span><span>Mês <b>${Math.round(passou)}%</b></span></div></div>` : ''}
@@ -924,6 +924,49 @@ function cardSemana(){
   if (DEMO || key(cur.y,cur.m) !== chaveHoje() || !(dow === 0 || dow === 1) || S.semanaVista === dataHoje() || (S.semanaVista && diasDesde(S.semanaVista) < 2)) return '';
   const a = dadosSemana(0); if (!a.total) return '';
   return `<button class="alert info semana-card" data-act="semana"><span>📅</span><div><b>Sua semana fechou</b><br>Você gastou <b class="num">${brl(a.total)}</b> nos últimos 7 dias. Toque para ver o resumo.</div></button>`;
+}
+
+/* ---------- primeiros passos e modo simples ----------
+   Clientes novos começam com a tela inicial enxuta (S.modoSimples) e uma lista de 4 passos.
+   O modo simples sai sozinho depois de 7 dias com pelo menos 5 lançamentos, ou quando a pessoa pede. */
+function passosIniciais(){
+  const ms = Object.values(S.meses || {});
+  return [
+    { id:'entrada', feito: ms.some(M => M.entradas.length), t:'Cadastre o que entra', s:'Salário, renda ou freela do mês', act:'passoEntrada' },
+    { id:'gasto', feito: ms.some(M => M.gastos.length), t:'Anote seu primeiro gasto', s:'Pode ser o café de hoje', act:'passoGasto' },
+    { id:'conta', feito: ms.some(M => M.contas.length), t:'Adicione suas contas fixas', s:'Aluguel, luz, internet…', act:'passoConta' },
+    { id:'lembrete', feito: notifLigada() || !!S.passoLembretePulado, t:'Ligue os lembretes', s:'O app te lembra de anotar e das contas', act:'passoLembrete' }
+  ];
+}
+function cardPassos(){
+  if (DEMO || S.passosFechado || key(cur.y,cur.m) !== chaveHoje()) return '';
+  const ps = passosIniciais(), feitos = ps.filter(p => p.feito).length;
+  const dias = [...new Set(S.diasAtivos || [])].sort();
+  const novo = S.modoSimples || !dias.length || diasDesde(dias[0]) <= 14;
+  if (!novo) return '';
+  if (feitos === ps.length){
+    if (!S.passosConcluidos){ S.passosConcluidos = dataHoje(); salvar(); }
+    if (diasDesde(S.passosConcluidos) > 0) return '';
+    return `<section class="card passos" id="passos"><h3>🎉 Tudo pronto!</h3><p class="note" style="margin:0 0 10px">Agora é só ir anotando. O <b>Pode gastar hoje</b> se atualiza sozinho.</p><button class="link-sutil" data-act="passosFechar">Fechar</button></section>`;
+  }
+  return `<section class="card passos" id="passos"><h3>🚀 Primeiros passos <small>${feitos} de ${ps.length}</small></h3>
+    <div class="bar" style="margin-bottom:12px"><div style="width:${feitos / ps.length * 100}%"></div></div>
+    ${ps.map((p, i) => `<button class="passo ${p.feito ? 'ok' : ''}" data-act="${p.act}" ${p.feito ? 'disabled' : ''}>
+      <span class="passo-n">${p.feito ? '✓' : i + 1}</span><span class="passo-t"><b>${p.t}</b><small>${p.s}</small></span>${p.feito ? '' : '<span class="passo-seta">›</span>'}</button>`).join('')}
+    <div class="passos-pe"><button class="link-sutil" data-act="ajuda">Precisa de ajuda?</button><button class="link-sutil" data-act="passosFechar">Ocultar</button></div>
+  </section>`;
+}
+// Sai do modo simples sozinho depois de 7 dias com pelo menos 5 lançamentos.
+function revisarModoSimples(){
+  if (!S.modoSimples) return;
+  const n = soma(Object.values(S.meses || {}), M => M.gastos.length + M.entradas.length);
+  if (diasDesde(S.simplesDesde) >= 7 && n >= 5){ S.modoSimples = false; S.avisoCompleto = true; salvar(); }
+}
+function cardModoCompleto(){
+  if (S.modoSimples) return `<button class="ver-mais" data-act="modoCompleto">Mostrar tudo: gráficos, fluxo do dinheiro e mais</button>`;
+  if (S.avisoCompleto) return `<div class="alert info backup"><span>✨</span><div><b>Sua tela inicial agora mostra mais</b><br>Como você já pegou o jeito, liberamos os gráficos, o fluxo do dinheiro e outros detalhes.
+    <div class="acts"><button class="btn sec" data-act="avisoCompletoOk">Entendi</button><button class="btn sec" data-act="modoSimplesVoltar">Prefiro simples</button></div></div></div>`;
+  return '';
 }
 
 /* ---------- colar do banco ----------
@@ -1878,13 +1921,15 @@ function telaResumo(){
   const C = calc(cur.y,cur.m), P = C.P;
   const prox = nextYM(cur.y,cur.m);
   const neg = C.restante < 0;
-  let html = heroResumo(C) + cardSemana() + cardOrganizar() + cardRendaVariavel(C);
+  revisarModoSimples();
+  const simples = !!S.modoSimples;
+  let html = heroResumo(C) + cardPassos() + (simples ? '' : cardModoCompleto()) + cardSemana() + cardOrganizar() + cardRendaVariavel(C);
 
   html += cardTagAtiva();
   html += cardRetro();
   html += dicaTransferir();
   html += lembreteBackup();
-  if (!S.listaDispensada && !precisaBackup()) html += cardConectado();
+  if (!S.listaDispensada && !precisaBackup() && !S.modoSimples) html += cardConectado();
   html += alertasContas();
   html += alertasOrcamento(C);
 
@@ -1900,6 +1945,7 @@ function telaResumo(){
 
   html += cardDicas();
   html += cardCategorias(C);
+  if (simples) return html + cardModoCompleto();   // modo simples: só o essencial
   html += cardFluxo(C);
   html += grade;
   html += cardOrcamentos(C);
@@ -2636,6 +2682,8 @@ function telaAjustes(){
     <div class="f"><label>Quero ser chamado(a) de</label><input id="pNome" value="${esc(p.nome)}"></div>
     <div class="f"><label>Meus pronomes são</label><select id="pPron">${['Masculinos','Femininos','Neutros'].map(o=>`<option ${o===p.pronome?'selected':''}>${o}</option>`).join('')}</select></div>
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
+  <section class="card"><h3>Tela inicial</h3>
+    <div class="switch"><span>Modo simples <small class="muted">(só o essencial na tela inicial)</small></span><button class="tg ${S.modoSimples?'on':''}" data-act="modoSimplesTg" aria-label="Modo simples"></button></div></section>
   <section class="card"><h3>Personalidade do Tino</h3>
     <div class="temas">${[['gentil','🙂 Gentil'],['sincero','😏 Sincero']].map(([v,l])=>`<button class="${(S.tom||'gentil')===v?'on':''}" data-act="tom" data-v="${v}">${l}</button>`).join('')}</div>
     <p class="note">No modo sincero, as dicas ficam mais diretas e bem-humoradas.</p></section>
@@ -2903,6 +2951,16 @@ document.addEventListener('click', e=>{
   }
   const a = t.dataset.act;
   if (a==='fechar'){ fechar(); return; }
+  if (a==='passoEntrada'){ abrirForm('entradas'); return; }
+  if (a==='passoGasto'){ abrirForm('gastos'); return; }
+  if (a==='passoConta'){ aba = 'contas'; render(); window.scrollTo(0, 0); setTimeout(() => abrirForm('contas'), 150); return; }
+  if (a==='passoLembrete'){ if (!suportaPush()){ S.passoLembretePulado = true; salvar(); render(); return toast(/iphone|ipad/i.test(navigator.userAgent) ? 'No iPhone, os lembretes funcionam com o app instalado na tela de início' : 'Este navegador não permite lembretes'); }
+    aba = 'ajustes'; render(); setTimeout(() => { const h = [...document.querySelectorAll('.card h3')].find(x => x.textContent.trim() === 'Notificações'); if (h) window.scrollTo(0, h.closest('.card').getBoundingClientRect().top + scrollY - 80); }, 100); return; }
+  if (a==='passosFechar'){ S.passosFechado = true; salvar(); render(); return; }
+  if (a==='modoCompleto'){ S.modoSimples = false; salvar(); render(); toast('Tela completa ✓ Dá para voltar ao modo simples em Ajustes.'); return; }
+  if (a==='modoSimplesVoltar'){ S.modoSimples = true; S.simplesDesde = new Date().toISOString(); S.avisoCompleto = false; salvar(); render(); return; }
+  if (a==='avisoCompletoOk'){ S.avisoCompleto = false; salvar(); render(); return; }
+  if (a==='modoSimplesTg'){ S.modoSimples = !S.modoSimples; if (S.modoSimples) S.simplesDesde = new Date().toISOString(); S.avisoCompleto = false; t.classList.toggle('on', S.modoSimples); salvar(); toast(S.modoSimples ? 'Modo simples ligado' : 'Tela completa'); return; }
   if (a==='excluirConta'){ abrirExcluirConta(); return; }
   if (a==='excluirConfirmar'){ excluirConta(t); return; }
   if (a==='orcAcum'){ S.orcAcumular = S.orcAcumular ? null : { desde: key(prevYM(hoje.getFullYear(), hoje.getMonth()).y, prevYM(hoje.getFullYear(), hoje.getMonth()).m) }; t.classList.toggle('on', !!S.orcAcumular); salvar(); render(); toast(S.orcAcumular ? 'Sobras passam a acumular a partir deste mês ✓' : 'Acúmulo desligado'); return; }
@@ -3002,6 +3060,7 @@ document.addEventListener('click', e=>{
     S.cofrinhos = [];
     if (S.perfil.reservaMeta > 0) S.cofrinhos.push({ id:'reserva', nome:'Reserva de emergência', emoji:'🛟', alvo:S.perfil.reservaMeta, prazo:'' });
     if (S.perfil.metaValor > 0 || S.perfil.metaNome) S.cofrinhos.push({ id:'meta', nome:S.perfil.metaNome||'Minha meta', emoji:'🎯', alvo:S.perfil.metaValor, prazo:'' });
+    S.modoSimples = true; S.simplesDesde = new Date().toISOString();
     S.tourVisto = false; S.versaoVista = APP_VERSAO; aba = 'resumo'; salvar(); render(); iniciarTour();
   }
   else if (a==='fecharNovidades'){ S.versaoVista = APP_VERSAO; salvar(); fechar(); }
@@ -3097,7 +3156,7 @@ function nomeAparelho(){
   return `${sist} · ${nav}`;
 }
 const apiAparelhos = (dados) => fetch('api/aparelhos', { method:'POST', headers:{'Content-Type':'application/json'},
-  body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), nome:nomeAparelho(), ...dados }) })
+  body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), nome:nomeAparelho(), lancou: (S.diasAtivos || []).length > 0, ...dados }) })
   .then(r => r.json().then(d => ({ status:r.status, d })));
 
 // Ao abrir com internet (no máximo uma vez por dia), confere se este aparelho ainda tem acesso.
@@ -3299,27 +3358,15 @@ window.addEventListener('online', () => checarVersao(false));
    Escurece a tela, destaca um elemento por vez e explica. Passa pelas abas sozinho. */
 const PASSOS_TOUR = [
   { titulo: () => `👋 ${S.perfil.pronome==='Femininos'?'Bem-vinda':S.perfil.pronome==='Masculinos'?'Bem-vindo':'Boas-vindas'}, ${esc(S.perfil.nome)}!`,
-    texto: 'Em 1 minuto você aprende a usar o app. Toque em <b>Próximo</b> para avançar.' },
-  { aba:'resumo', sel:'.hero', titulo:'Restante para gastar',
-    texto:'Quanto você ainda pode gastar no mês: suas entradas menos o que já saiu e o que você guardou. No mês atual, mostra também <b>quanto dá para gastar por dia</b>.' },
-  { aba:'resumo', sel:'.monthbar', titulo:'Mês a mês',
-    texto:'Use as setas para ver outros meses. O que sobra num mês passa para o seguinte (dá para desligar em Ajustes).' },
-  { aba:'resumo', sel:'nav .fab', titulo:'Lançar é rápido',
-    texto:'Toque no <b>+</b>, digite o valor, escolha a categoria e salve. Ou só escreva (ou fale 🎤) algo como <b>“gastei 45 no ifood no crédito”</b> que o app preenche tudo.' },
-  { aba:'resumo', sel:'#cardCategorias', titulo:'Para onde vai seu dinheiro',
-    texto:'Gráficos dos seus gastos por categoria. Toque numa categoria para ver o histórico dos últimos meses.' },
-  { aba:'lanc', sel:'.busca', titulo:'Seus lançamentos',
-    texto:'Em <b>Lançamentos</b> ficam entradas, gastos e reservas de cada mês. A busca encontra qualquer lançamento, de todos os meses.' },
-  { aba:'contas', sel:'[data-act=addConta]', titulo:'Contas fixas',
-    texto:'Cadastre aluguel, luz, internet… com o dia do vencimento. Marque ✓ quando pagar. O app avisa quando uma conta está para vencer e copia suas contas para o mês seguinte.' },
-  { aba:'metas', sel:'#cardOrcamentos', titulo:'Orçamentos',
-    texto:'Defina um limite por categoria, como Mercado R$ 800. O app avisa quando você chega perto e quando estoura.' },
-  { aba:'metas', sel:'#cardMetas', titulo:'Cofrinhos',
-    texto:'Crie cofrinhos para cada objetivo: viagem, carro, reserva de emergência… Defina um prazo e o app diz <b>quanto guardar por mês</b>.' },
-  { aba:'ajustes', sel:'#cardBackup', titulo:'Faça backup',
-    texto:'Seus dados ficam só neste aparelho. Faça backup de vez em quando para não perder nada ao trocar de celular — o app te lembra.' },
+    texto: 'Em 30 segundos você aprende o básico. Toque em <b>Próximo</b> para avançar.' },
+  { aba:'resumo', sel:'.hero', titulo:'Pode gastar hoje',
+    texto:'O número mais importante do app: quanto você ainda pode gastar hoje, já descontando as contas que vão vencer. Ele se atualiza sozinho conforme você anota.' },
+  { aba:'resumo', sel:'nav .fab', titulo:'Anotar é rápido',
+    texto:'Toque no <b>+</b>, digite o valor e escolha a categoria. Ou escreva (ou fale 🎤) <b>“gastei 45 no ifood no crédito”</b> que o app preenche tudo.' },
+  { aba:'resumo', sel:'#passos', titulo:'Seus primeiros passos',
+    texto:'Siga estes 4 passos para o app começar a trabalhar por você. Cada um leva menos de um minuto.' },
   { aba:'resumo', titulo:'🎉 Tudo pronto!',
-    texto:'Que tal começar lançando sua renda do mês? Depois é só ir anotando seus gastos.', final:true }
+    texto:'O resto você descobre com calma, nas abas lá embaixo. Se precisar, a ajuda fica em <b>Ajustes</b>.', final:true }
 ];
 let tour = null;
 function iniciarTour(){ tour = 0; mostrarPasso(); }

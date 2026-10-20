@@ -188,6 +188,7 @@ function desenharMetricas(){
     <div class="secao">Uso do app</div>
     <div class="kpis">
       ${k('Ativaram o app', pct(ativaram.length, todos.length), `${ativaram.length} de ${todos.length} com acesso`, ativaram.length/Math.max(1,todos.length) >= .8 ? 'bom' : '')}
+      ${k('Anotaram algo', pct(ativaram.filter(p => p.lancou).length, ativaram.length), 'de quem ativou (desde 21/10)', ativaram.length && ativaram.filter(p => p.lancou).length / ativaram.length >= .6 ? 'bom' : '')}
       ${k('Ativos em 7 dias', at7, pct(at7, ativaram.length) + ' de quem ativou')}
       ${k('Ativos em 30 dias', at30, pct(at30, ativaram.length) + ' de quem ativou')}
       ${k('Retenção 30+ dias', antigos.length ? pct(ret, antigos.length) : '—', antigos.length ? `${ret} de ${antigos.length} ainda usam` : 'aparece após 30 dias de vendas', antigos.length && ret/antigos.length >= .4 ? 'bom' : '')}

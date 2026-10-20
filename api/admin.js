@@ -73,7 +73,7 @@ module.exports = async (req, res) => {
         const info = Object.values((u && u.info) || {});
         pessoas.push({ criado: c.criado || null, cakto: c.origem === 'cakto', ativou: !!u, ativouEm: u ? u.em : null,
           visto: info.map((i) => i.visto || i.em).filter(Boolean).sort().pop() || (u ? u.em : null),
-          apar: info.length, inst: info.filter((i) => /instalado/i.test(i.nome || '')).length,
+          lancou: info.some((i) => i.lancou), apar: info.length, inst: info.filter((i) => /instalado/i.test(i.nome || '')).length,
           ios: info.filter((i) => /iPhone|iPad/.test(i.nome || '')).length, android: info.filter((i) => /Android/.test(i.nome || '')).length });
       }
       let nuvem = 0, cursor = '0';
