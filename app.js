@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 45;
+const APP_VERSAO = 46;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -3398,6 +3398,7 @@ function dadosDemo(){
     const g = (cat, desc, valor, forma, d, extra) => { if (d <= lim) M.gastos.push({ id:uid(), cat, desc, valor, forma, data:dia(d), essencial:ESSENCIAIS.includes(cat), parcelas:1, ...(forma==='Crédito'?{ cartao:'nubank' }:{}), ...(extra||{}) }); };
     M.entradas.push({ id:uid(), nome:'Salário', valor:5400, fixa:true, data:dia(5) });
     if (off === -2 || off === -1) M.entradas.push({ id:uid(), nome:'Freela', valor:entre(500,900), data:dia(18) });
+    if (off === 0) M.entradas.push({ id:uid(), nome:'Freela', valor:900, data:dia(2) });   // folga no mês atual: o "Posso comprar?" da demonstração não pode dizer "não" para tudo
     [3,11,24].forEach(d => g('🧺 Mercado','Supermercado', entre(160,320), rnd()<.5?'Débito':'Pix / Dinheiro', d));
     [7,21].forEach(d => g('🧺 Mercado','Feira', entre(40,75), 'Pix / Dinheiro', d));
     [2,9,14,19,27].forEach(d => g('🍗 Alimentação','iFood', entre(35,72), 'Crédito', d));
