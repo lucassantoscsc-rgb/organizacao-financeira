@@ -1,10 +1,10 @@
 {
-  "versao": 44,
+  "versao": 45,
   "novidades": [
-    "🎨 Visual novo, com a cara do Tino: verde e dourado, letras novas e tela inicial mais limpa.",
-    "💚 \"Pode gastar hoje\": o número que importa logo no topo, com uma barra que mostra se seus gastos do dia a dia estão no ritmo do mês.",
-    "📋 Colar do banco: copie a notificação de compra ou o comprovante do Pix e o Tino lança sozinho. No Android, dá para usar o Compartilhar do app do banco.",
-    "🌊 Para onde foi seu dinheiro: veja o caminho do que entrou até cada categoria.",
-    "📅 Minha semana: seus gastos dos últimos 7 dias, dia a dia, comparados com a semana anterior."
+    "💎 Patrimônio: veja o que você tem menos o que deve, em Planejar.",
+    "🔁 Orçamento que acumula: o que sobrar numa categoria passa para o mês seguinte. Ligue em Planejar → Orçamentos.",
+    "💼 Minha renda varia: para autônomos e comissionados. Acompanhe o que já entrou e guarde o excedente. Em Ajustes.",
+    "😏 Tino sincero: dicas mais diretas e bem-humoradas. Escolha a personalidade em Ajustes.",
+    "🧹 Gastos em “Outros” aparecem para você organizar com um toque."
   ]
 }

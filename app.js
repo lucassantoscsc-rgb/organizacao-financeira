@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 44;
+const APP_VERSAO = 45;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -972,6 +972,84 @@ function abrirColar(){
     <p class="note" style="text-align:center;margin-top:10px">🔒 O texto é lido só aqui no seu celular.${/android/i.test(navigator.userAgent) ? ' Dica: no app do banco, use <b>Compartilhar → Tino</b>.' : ''}</p>`);
 }
 
+/* ---------- patrimônio ----------
+   O que você tem (cofrinhos, investimentos, valores a receber) menos o que deve (dívidas e parcelas futuras).
+   A evolução é guardada uma vez por mês, a partir de quando o recurso existe. */
+function calcPatrimonio(){
+  const kh = chaveHoje();
+  const cofs = soma(S.cofrinhos || [], c => Math.max(0, guardadoAte(c.id, kh)));
+  let invest = 0; Object.entries(S.meses).forEach(([mk, M]) => { if (mk <= kh) invest += soma(M.reservas.filter(r => !cofDe(r)), r => r.valor); });
+  const receber = soma(pendentes(), r => r.valor);
+  const dividas = soma(dividasAtivas(), d => d.saldo), parcelas = comprometidoFuturo();
+  const ativos = cofs + Math.max(0, invest) + receber, passivos = dividas + parcelas;
+  return { cofs, invest: Math.max(0, invest), receber, dividas, parcelas, ativos, passivos, liquido: ativos - passivos };
+}
+function cardPatrimonio(){
+  if (DEMO && !Object.keys(S.meses).length) return '';
+  const P = calcPatrimonio();
+  if (!P.ativos && !P.passivos) return '';
+  const kh = chaveHoje(); S.patrHist = S.patrHist || {};
+  if (!DEMO && Math.abs((S.patrHist[kh] ?? NaN) - P.liquido) >= 0.01){ S.patrHist[kh] = Math.round(P.liquido * 100) / 100; try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch(e){} }
+  const hist = Object.entries(S.patrHist).sort().slice(-6);
+  const max = Math.max(...hist.map(([,v]) => Math.abs(v)), 1);
+  const linha = (l, v, sinal) => v > 0 ? `<div class="pat-l"><span>${l}</span><b class="num">${sinal}${brl(v)}</b></div>` : '';
+  return `<section class="card" id="cardPatrimonio"><h3>💎 Patrimônio <small>o que você tem − o que deve</small></h3>
+    <div class="pat-total num ${P.liquido < 0 && !S.ocultar ? 'neg' : ''}">${brl(P.liquido)}</div>
+    <div class="pat-cols">
+      <div><small>Você tem</small>${linha('🐷 Cofrinhos', P.cofs, '')}${linha('📈 Investimentos', P.invest, '')}${linha('🤝 A receber', P.receber, '')}${P.ativos ? '' : '<div class="pat-l"><span>—</span></div>'}</div>
+      <div><small>Você deve</small>${linha('💸 Dívidas', P.dividas, '')}${linha('💳 Parcelas futuras', P.parcelas, '')}${P.passivos ? '' : '<div class="pat-l"><span>Nada 🎉</span></div>'}</div>
+    </div>
+    ${hist.length >= 2 ? `<div class="pat-hist" role="img" aria-label="Evolução do patrimônio">${hist.map(([k, v]) => `<div class="ph"><span class="ph-b ${v < 0 ? 'neg' : ''}" style="height:${Math.max(Math.abs(v) / max * 100, 4)}%"></span><span class="ph-d">${MES_CURTO[ymDe(k).m]}</span></div>`).join('')}</div>`
+      : '<p class="note" style="margin:10px 0 0">A evolução mês a mês aparece aqui a partir do próximo mês.</p>'}
+  </section>`;
+}
+
+/* ---------- renda variável ----------
+   Para quem é autônomo ou ganha comissão: define uma "renda segura" (o mínimo que costuma entrar)
+   e o app mostra o que já entrou no mês e sugere guardar o que vier acima dela. */
+function rendaSeguraSugerida(){
+  const v = []; for (let i = 1; i <= 6 && v.length < 3; i++){ const o = somaMeses(hoje.getFullYear(), hoje.getMonth(), -i); if (temDados(S.meses[key(o.y,o.m)])){ const r = calc(o.y,o.m).renda; if (r > 0) v.push(r); } }
+  return v.length ? Math.floor(Math.min(...v) / 50) * 50 : 0;
+}
+function cardRendaVariavel(C){
+  const rv = S.rendaVariavel; if (!rv || !rv.ativo || !(rv.segura > 0) || key(cur.y,cur.m) !== chaveHoje()) return '';
+  const rec = C.renda, pct = Math.min(100, rec / rv.segura * 100), acima = rec - rv.segura;
+  return `<section class="card renda-card"><h3>💼 Renda do mês <small>renda segura ${brl0(rv.segura)}</small></h3>
+    <div class="bar"><div style="width:${pct}%"></div></div>
+    <div class="goal"><div class="foot"><span>Já entrou <b class="num">${brl(rec)}</b></span><span>${Math.round(rec / rv.segura * 100)}%</span></div></div>
+    ${acima > 0 ? `<div class="dica"><span class="d-e">🌤️</span><div><span>Você recebeu <b>${brl(acima)}</b> acima da sua renda segura. Guardar o excedente protege os meses mais fracos.</span><button class="d-acao" data-act="guardarExcedente" data-v="${Math.round(acima * 100) / 100}">Guardar o excedente</button></div></div>`
+      : hoje.getDate() >= 20 && rec < rv.segura ? `<p class="note" style="margin:0">Mês mais fraco até agora: faltam ${brl(rv.segura - rec)} para a renda segura. Se precisar, use a reserva com calma.</p>`
+      : `<p class="note" style="margin:0">O “Pode gastar hoje” conta só o que já entrou. Quando entrar mais, ele sobe sozinho.</p>`}
+  </section>`;
+}
+function abrirRendaVariavel(){
+  const rv = S.rendaVariavel || {}, sug = rendaSeguraSugerida();
+  abrir(`<h2>💼 Minha renda varia</h2>
+    <p class="note" style="margin:0 0 12px">Para autônomos, comissão ou freela. Defina a <b>renda segura</b>: o mínimo que costuma entrar num mês fraco. O Tino mostra quanto já entrou e sugere guardar o que vier acima disso.</p>
+    <div class="f"><label>Renda segura por mês</label><input class="num money" id="rvSegura" inputmode="decimal" placeholder="0,00" value="${rv.segura ? moneyVal(rv.segura) : sug ? moneyVal(sug) : ''}"></div>
+    ${sug ? `<p class="note" style="margin:-6px 0 12px">Sugestão: ${brl0(sug)}, a menor renda dos seus últimos meses.</p>` : ''}
+    <button class="btn pri" data-act="salvarRenda">Ativar</button>
+    ${rv.ativo ? '<button class="btn sec" data-act="desligarRenda">Desligar</button>' : ''}`);
+}
+
+/* ---------- organizar "Outros" ----------
+   Gastos do mês que ficaram sem categoria aparecem para organizar com um toque. */
+const OUTROS = '❓ Outros';
+function gastosEmOutros(){ return mes(cur.y,cur.m).gastos.filter(g => g.cat === OUTROS); }
+function cardOrganizar(){
+  if (key(cur.y,cur.m) !== chaveHoje()) return '';
+  const n = gastosEmOutros().length; if (!n) return '';
+  return `<button class="alert info semana-card" data-act="organizar"><span>🧹</span><div><b>${n} gasto${n>1?'s':''} em “Outros”</b><br>Escolha a categoria com um toque para seus gráficos e dicas ficarem certos.</div></button>`;
+}
+function abrirOrganizar(){
+  const gs = gastosEmOutros();
+  if (!gs.length){ fechar(); render(); return toast('Tudo organizado ✓'); }
+  abrir(`<h2>🧹 Organizar “Outros”</h2>
+    <p class="note" style="margin:0 0 12px">Escolha a categoria de cada gasto. O Tino aprende e acerta sozinho na próxima vez que você escrever algo parecido.</p>
+    <div class="org-lista">${gs.map(g => `<div class="org-item"><div class="org-t"><b>${esc(g.desc || 'Sem descrição')}</b><span class="num">${brl(g.valor)} · ${fmtData(g.data)}</span></div>
+      <div class="org-cats">${CATEGORIAS.filter(c => c !== OUTROS).map(c => `<button data-act="orgCat" data-id="${g.id}" data-c="${esc(c)}" title="${esc(nomeCat(c))}">${emojiCat(c)}<small>${esc(nomeCat(c))}</small></button>`).join('')}</div></div>`).join('')}</div>`);
+}
+
 /* ---------- lista de espera: Tino Conectado ----------
    Valida o interesse num plano futuro com Open Finance antes de construir.
    Mostra um card no Resumo até a pessoa entrar na lista ou dispensar; também fica em Ajustes. */
@@ -1733,7 +1811,7 @@ const ICON = {
 };
 
 function render(){
-  memo = {}; memoParc = null; memoFat = null;
+  memo = {}; memoParc = null; memoFat = null; memoOrc = {};
   if (aba==='ajustes' && temSenha()) bioDisponivel().then(ok => { const l = document.getElementById('linhaBio'); if (l) l.hidden = !ok; });
   if (CONFIG.exigirCodigo && !S.liberado) return renderAcesso();
   if (!S.perfil.ok) return renderOnboarding();
@@ -1774,7 +1852,7 @@ function telaResumo(){
   const C = calc(cur.y,cur.m), P = C.P;
   const prox = nextYM(cur.y,cur.m);
   const neg = C.restante < 0;
-  let html = heroResumo(C) + cardSemana();
+  let html = heroResumo(C) + cardSemana() + cardOrganizar() + cardRendaVariavel(C);
 
   html += cardTagAtiva();
   html += cardRetro();
@@ -1831,21 +1909,21 @@ function calcularDicas(){
   if (base.length && frac >= 0.2) Object.entries(media).forEach(([c, md]) => {
     if (FIXAS.includes(c) || md < 50) return;
     const esp = md * frac, at = C.cats[c] || 0;
-    if (at > esp * 1.3 && at - esp >= 40) dicas.push({ e:'📈', p: 60 + (at-esp)/10, t:`<b>${esc(nomeCat(c))}</b>: você já gastou ${brl(at)}, ${pct(at,esp)}% acima do normal para esta altura do mês.` });
+    if (at > esp * 1.3 && at - esp >= 40) dicas.push({ e:'📈', p: 60 + (at-esp)/10, s:`<b>${esc(nomeCat(c))}</b> tá pesado: ${brl(at)} até agora, ${pct(at,esp)}% acima do seu normal. Seu bolso pediu socorro 🫠`, t:`<b>${esc(nomeCat(c))}</b>: você já gastou ${brl(at)}, ${pct(at,esp)}% acima do normal para esta altura do mês.` });
     else if (md >= 100 && frac >= 0.4 && at < esp * 0.7) dicas.push({ e:'👏', p: 30, t: at === 0 ? `Nada gasto em <b>${esc(nomeCat(c))}</b> até agora este mês. Continue assim!` : `<b>${esc(nomeCat(c))}</b> está ${pct(at,esp)}% abaixo do normal. Continue assim!` });
   });
   // 3. ritmo geral
   if (base.length && frac >= 0.25){
     const esp = soma(Object.entries(media).filter(([c])=>!FIXAS.includes(c)), x=>x[1]) * frac;
     const at = C.consumo - (C.cats[CAT_CONTAS]||0) - (C.cats['🧾 Contas']||0) - (C.cats['🧾 Parcela']||0);
-    if (esp > 0 && at > esp * 1.15) dicas.push({ e:'⚠️', p: 75, t:`No geral, você está gastando <b>${pct(at,esp)}% acima do normal</b> neste mês.` });
-    else if (esp > 0 && at < esp * 0.85) dicas.push({ e:'🎉', p: 45, t:`Você está gastando <b>${pct(at,esp)}% menos</b> que o normal neste mês. Mandou bem!` });
+    if (esp > 0 && at > esp * 1.15) dicas.push({ e:'⚠️', p: 75, s:`Mês acelerado: você está gastando <b>${pct(at,esp)}% acima do normal</b>. Bora pisar no freio? 🛑`, t:`No geral, você está gastando <b>${pct(at,esp)}% acima do normal</b> neste mês.` });
+    else if (esp > 0 && at < esp * 0.85) dicas.push({ e:'🎉', p: 45, s:`Gastando <b>${pct(at,esp)}% menos</b> que o normal. Quem é você e o que fez com o gastador? 😎`, t:`Você está gastando <b>${pct(at,esp)}% menos</b> que o normal neste mês. Mandou bem!` });
   }
   // 4. ainda não guardou
-  if (d >= 10 && C.renda > 0 && C.reservas <= 0) dicas.push({ e:'🐷', p: 70, acao:'guardar', t:`Você ainda não guardou nada este mês. Que tal guardar <b>${brl(Math.round(C.renda*0.1/10)*10)}</b> (10% da renda) agora?` });
+  if (d >= 10 && C.renda > 0 && C.reservas <= 0) dicas.push({ e:'🐷', p: 70, s:`Nada guardado este mês ainda. Seu eu do futuro mandou avisar que está esperando <b>${brl(Math.round(C.renda*0.1/10)*10)}</b> 👀`, acao:'guardar', t:`Você ainda não guardou nada este mês. Que tal guardar <b>${brl(Math.round(C.renda*0.1/10)*10)}</b> (10% da renda) agora?` });
   // 5. gastos pequenos
   const M = mes(y,m), peq = M.gastos.filter(g=>!ehParcelado(g) && g.valor <= 30);
-  if (peq.length >= 8 && soma(peq,g=>g.valor) >= 150) dicas.push({ e:'☕', p: 50, t:`Os gastos pequenos (até R$ 30) já somam <b>${brl(soma(peq,g=>g.valor))}</b> este mês, em ${peq.length} lançamentos.` });
+  if (peq.length >= 8 && soma(peq,g=>g.valor) >= 150) dicas.push({ e:'☕', p: 50, s:`Os “é só um cafezinho” já somam <b>${brl(soma(peq,g=>g.valor))}</b> em ${peq.length} lançamentos. Cafezinho caro, hein ☕`, t:`Os gastos pequenos (até R$ 30) já somam <b>${brl(soma(peq,g=>g.valor))}</b> este mês, em ${peq.length} lançamentos.` });
   // 6. economia anual cortando 20% da maior categoria não essencial
   const top = Object.entries(media).filter(([c])=>NAO_ESSENCIAIS.includes(c)).sort((a,b)=>b[1]-a[1])[0];
   if (top && top[1] >= 150) dicas.push({ e:'✂️', p: 28, t:`Cortando 20% de <b>${esc(nomeCat(top[0]))}</b>, você economiza ${brl0(top[1]*0.2*12)} por ano.` });
@@ -1856,10 +1934,10 @@ function calcularDicas(){
   if (totDias > 300 && maxDia/totDias >= 0.24){ const n = porDia.indexOf(maxDia); dicas.push({ e:'📅', p: 20, t:`<b>${DIAS_SEMANA[n].charAt(0).toUpperCase()+DIAS_SEMANA[n].slice(1)}</b> é o dia em que você mais gasta: ${Math.round(maxDia/totDias*100)}% dos gastos dos últimos 2 meses.` }); }
   // 8. parcelas futuras pesadas
   const renda = base.length ? soma(base, b=>b.renda)/base.length : C.renda, fut = comprometidoFuturo();
-  if (renda > 0 && fut > renda * 0.3) dicas.push({ e:'💳', p: 55, t:`Você já tem <b>${brl(fut)}</b> em parcelas nos próximos meses (${Math.round(fut/renda*100)}% de um mês de renda). Cuidado com novas compras parceladas.` });
+  if (renda > 0 && fut > renda * 0.3) dicas.push({ e:'💳', p: 55, s:`Já tem <b>${brl(fut)}</b> em parcelas pela frente. Mais um “12x sem juros” e o cartão pede férias 💳`, t:`Você já tem <b>${brl(fut)}</b> em parcelas nos próximos meses (${Math.round(fut/renda*100)}% de um mês de renda). Cuidado com novas compras parceladas.` });
   // 9. assinaturas
   const assin = detectarAssinaturas().filter(a=>a.ativa), anual = soma(assin, a=>a.valor) * 12;
-  if (anual >= 600) dicas.push({ e:'🔁', p: 25, acao:'assinaturas', t:`Suas assinaturas custam <b>${brl0(anual)} por ano</b>. Vale revisar se você usa todas.` });
+  if (anual >= 600) dicas.push({ e:'🔁', p: 25, acao:'assinaturas', s:`Suas assinaturas custam <b>${brl0(anual)} por ano</b>. Você usa tudo isso mesmo? 🤨`, t:`Suas assinaturas custam <b>${brl0(anual)} por ano</b>. Vale revisar se você usa todas.` });
   // 10. meta da reserva muito abaixo do ideal (ou sem reserva)
   const res = cofReserva(), ideal = reservaIdeal(6);
   if (ideal && !res) dicas.push({ e:'🛟', p: 40, acao:'criarReserva', t:`Você ainda não tem reserva de emergência. O ideal para você é cerca de <b>${brl0(ideal)}</b>.` });
@@ -1886,7 +1964,7 @@ function cardDicas(){
   const dicas = calcularDicas(); if (!dicas.length) return '';
   const vis = dicasAbertas ? dicas : dicas.slice(0,3);
   return `<section class="card" id="cardDicas"><h3>💡 Dicas do mês</h3>
-    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':x.acao==='criarReserva'?'<button class="d-acao" data-act="criarReserva">Criar reserva</button>':x.acao==='abrirReserva'?'<button class="d-acao" data-act="abrirReserva">Ajustar meta</button>':x.acao==='meDevem'?`<button class="d-acao" data-act="meDevem" data-pessoa-nome="${esc(x.pessoa)}">Ver e cobrar</button>`:''}</div></div>`).join('')}</div>
+    <div class="dicas">${vis.map(x=>`<div class="dica"><span class="d-e">${x.e}</span><div><span>${S.tom === 'sincero' && x.s ? x.s : x.t}</span>${x.acao==='guardar'?'<button class="d-acao" data-act="guardarAgora">Guardar agora</button>':x.acao==='assinaturas'?'<button class="d-acao" data-act="assinaturas">Ver assinaturas</button>':x.acao==='criarReserva'?'<button class="d-acao" data-act="criarReserva">Criar reserva</button>':x.acao==='abrirReserva'?'<button class="d-acao" data-act="abrirReserva">Ajustar meta</button>':x.acao==='meDevem'?`<button class="d-acao" data-act="meDevem" data-pessoa-nome="${esc(x.pessoa)}">Ver e cobrar</button>`:''}</div></div>`).join('')}</div>
     ${dicas.length > 3 ? `<button class="d-mais" data-act="maisDicas">${dicasAbertas?'Mostrar menos':`Ver mais ${dicas.length-3} dica${dicas.length-3>1?'s':''}`}</button>` : ''}</section>`;
 }
 
@@ -2024,8 +2102,22 @@ function alertasContas(){
     ${lst.slice(0,3).map(x=>`${esc(x.c.nome)}: ${x.s.t}`).join(' · ')}</div></button>`;
 }
 
+/* Orçamento que acumula: com S.orcAcumular ligado, o que sobra (ou estoura) numa categoria passa para o mês
+   seguinte. Começa a contar a partir do mês S.orcAcumular.desde; o saldo carregado fica entre −1x e +2x o limite. */
+let memoOrc = {};
+function limiteOrc(c, y, m){
+  const base = S.orcamentos[c] || 0;
+  if (!base || !S.orcAcumular) return base;
+  const k = key(y,m), id = c + '|' + k;
+  if (id in memoOrc) return memoOrc[id];
+  if (k <= S.orcAcumular.desde) return memoOrc[id] = base;
+  const p = prevYM(y,m), pk = key(p.y,p.m);
+  const carry = temDados(S.meses[pk]) ? limiteOrc(c, p.y, p.m) - (calc(p.y,p.m).cats[c] || 0) : 0;
+  return memoOrc[id] = base + Math.max(-base, Math.min(2 * base, carry));
+}
+const orcamentosDoMes = (y, m) => Object.keys(S.orcamentos).filter(c => S.orcamentos[c] > 0).map(c => [c, limiteOrc(c, y, m)]);
 function alertasOrcamento(C){
-  const est = Object.entries(S.orcamentos).filter(([c,l])=>l>0 && (C.cats[c]||0) > l);
+  const est = orcamentosDoMes(cur.y,cur.m).filter(([c,l])=>(C.cats[c]||0) > l);
   if (!est.length) return '';
   return `<div class="alert crit"><span>⚠️</span><div><b>Orçamento estourado</b><br>${est.map(([c,l])=>`${esc(nomeCat(c))}: ${brl(C.cats[c]-l)} acima`).join(' · ')}</div></div>`;
 }
@@ -2115,20 +2207,21 @@ function abrirAssinaturas(){
 }
 
 function cardOrcamentos(C){
-  const lst = Object.entries(S.orcamentos).filter(([,l])=>l>0);
+  const lst = orcamentosDoMes(cur.y,cur.m);
   if (!lst.length) return `<section class="card" id="cardOrcamentos"><h3>Orçamentos</h3><div class="note" style="margin:0 0 12px">Defina um limite por categoria e o app avisa antes de você estourar.</div><button class="btn sec" data-act="orcamentos">Definir orçamentos</button></section>`;
   const tot = soma(lst, x=>x[1]), gasto = soma(lst, ([c])=>C.cats[c]||0);
   let h = `<section class="card" id="cardOrcamentos"><h3>Orçamentos <small>${brl(gasto)} de ${brl(tot)}</small></h3>`;
   lst.sort((a,b)=>((C.cats[b[0]]||0)/b[1])-((C.cats[a[0]]||0)/a[1])).forEach(([c,l])=>{
     const v = C.cats[c]||0, pct = v/l*100;
     const st = pct>100 ? 'crit' : pct>=80 ? 'warn' : '';
-    const txt = pct>100 ? `⚠️ ${brl(v-l)} acima` : `Resta ${brl(l-v)}`;
+    const extra = l - S.orcamentos[c];
+    const txt = (pct>100 ? `⚠️ ${brl(v-l)} acima` : `Resta ${brl(l-v)}`) + (Math.abs(extra) >= 0.01 ? ` · ${extra>0?'+':'−'}${brl(Math.abs(extra))} do mês anterior` : '');
     h += `<button class="meter ${st}" data-cat="${esc(c)}">
       <span class="row"><b>${emojiCat(c)} ${esc(nomeCat(c))}</b><span class="num">${brl(v)} de ${brl(l)}</span></span>
       <span class="bar"><span style="width:${Math.min(pct,100)}%"></span></span>
       <span class="foot"><span>${txt}</span><span class="num">${pct.toFixed(0)}%</span></span></button>`;
   });
-  return h + `<button class="btn sec" data-act="orcamentos">Editar orçamentos</button></section>`;
+  return h + `${S.orcAcumular ? '<p class="note" style="margin:0 0 10px">🔁 Sobras e estouros passam para o mês seguinte.</p>' : ''}<button class="btn sec" data-act="orcamentos">Editar orçamentos</button></section>`;
 }
 
 // Gráfico: entradas x saídas nos últimos 6 meses.
@@ -2172,7 +2265,7 @@ function barra(x, w, h, base, cls){
 
 // Detalhe de uma categoria: histórico de 6 meses + lançamentos do mês.
 function abrirCategoria(c){
-  const lim = S.orcamentos[c]||0;
+  const lim = limiteOrc(c, cur.y, cur.m);
   const meses = []; for (let i=5;i>=0;i--) meses.push(somaMeses(cur.y,cur.m,-i));
   const vals = meses.map(o => ({ o, v: calc(o.y,o.m).cats[c]||0, k:key(o.y,o.m) }));
   const usados = vals.filter(x=>x.v>0);
@@ -2469,6 +2562,7 @@ function telaMetas(){
   const anos = [...new Set(Object.keys(S.meses).map(k=>+k.slice(0,4)))].sort((a,b)=>b-a).filter(a => dadosRetroAno(a));
   return `${anos.length ? `<div class="anos-retro">${anos.map(a=>`<button class="btn sec" data-act="retroAno" data-ano="${a}">🎆 ${a === hoje.getFullYear() && hoje.getMonth() < 11 ? a + ' até agora' : 'Retrospectiva ' + a}</button>`).join('')}</div>` : ''}
   <button class="retro-card simular" data-act="possoComprar"><span class="rc-e">🤔</span><span><b>Posso comprar?</b><small>Simule uma compra antes de gastar</small></span><span class="rc-seta">›</span></button>
+  ${cardPatrimonio()}
   ${cardCofrinhos(false)}
   ${cardCartoes()}
   ${cardDividas()}
@@ -2516,6 +2610,12 @@ function telaAjustes(){
     <div class="f"><label>Quero ser chamado(a) de</label><input id="pNome" value="${esc(p.nome)}"></div>
     <div class="f"><label>Meus pronomes são</label><select id="pPron">${['Masculinos','Femininos','Neutros'].map(o=>`<option ${o===p.pronome?'selected':''}>${o}</option>`).join('')}</select></div>
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
+  <section class="card"><h3>Personalidade do Tino</h3>
+    <div class="temas">${[['gentil','🙂 Gentil'],['sincero','😏 Sincero']].map(([v,l])=>`<button class="${(S.tom||'gentil')===v?'on':''}" data-act="tom" data-v="${v}">${l}</button>`).join('')}</div>
+    <p class="note">No modo sincero, as dicas ficam mais diretas e bem-humoradas.</p></section>
+  <section class="card"><h3>Minha renda varia</h3>
+    <p class="note" style="margin:0 0 12px">${S.rendaVariavel && S.rendaVariavel.ativo ? `Ligado · renda segura de <b>${brl0(S.rendaVariavel.segura)}</b> por mês.` : 'Para autônomos, comissão ou freela: acompanhe o que já entrou no mês e guarde o que vier acima do normal.'}</p>
+    <button class="btn sec" data-act="rendaVariavel">${S.rendaVariavel && S.rendaVariavel.ativo ? 'Ajustar renda segura' : 'Ativar'}</button></section>
   <section class="card"><h3>Saldo entre meses</h3>
     <div class="switch"><span>Levar o que sobrou para o mês seguinte</span><button class="tg ${S.carry?'on':''}" data-act="carry" aria-label="Alternar"></button></div>
     <p class="note">Ligado: o “restante para gastar” de um mês entra como entrada no próximo.</p></section>
@@ -2699,7 +2799,7 @@ function salvarForm(){
 }
 // Mensagem depois de lançar um gasto numa categoria com orçamento.
 function avisoOrcamento(c){
-  const l = S.orcamentos[c]; if (!l) return 'Salvo ✓';
+  const l = limiteOrc(c, cur.y, cur.m); if (!l) return 'Salvo ✓';
   const v = calc(cur.y,cur.m).cats[c]||0, pct = v/l*100;
   if (pct > 100) return `⚠️ ${nomeCat(c)}: orçamento estourado em ${brl(v-l)}`;
   if (pct >= 80) return `Atenção: ${nomeCat(c)} em ${pct.toFixed(0)}% do orçamento`;
@@ -2716,6 +2816,7 @@ function abrirOrcamentos(){
     ${algumaMedia?'<button class="btn sec" data-act="orcMedia" style="margin-bottom:14px">Preencher com as minhas médias</button>':''}
     <div class="orclist">${CATEGORIAS.map((c,i)=>`<div class="orc"><span class="lbl">${emojiCat(c)} ${esc(nomeCat(c))}${medias[c]?`<small>média ${brl0(medias[c])}</small>`:''}</span>
       <input class="num" inputmode="decimal" data-orc="${i}" data-media="${Math.round(medias[c])}" placeholder="—" value="${S.orcamentos[c]?moneyVal(S.orcamentos[c]):''}"></div>`).join('')}</div>
+    <div class="switch" style="margin-top:16px"><span><b>Acumular para o mês seguinte</b><br><small class="note">O que sobrar numa categoria aumenta o limite do mês seguinte. O que estourar, diminui.</small></span><button class="tg ${S.orcAcumular?'on':''}" data-act="orcAcum" aria-label="Acumular sobras"></button></div>
     <button class="btn pri" data-act="salvarOrc" style="margin-top:14px">Salvar orçamentos</button>`);
 }
 
@@ -2775,6 +2876,14 @@ document.addEventListener('click', e=>{
   }
   const a = t.dataset.act;
   if (a==='fechar'){ fechar(); return; }
+  if (a==='orcAcum'){ S.orcAcumular = S.orcAcumular ? null : { desde: key(prevYM(hoje.getFullYear(), hoje.getMonth()).y, prevYM(hoje.getFullYear(), hoje.getMonth()).m) }; t.classList.toggle('on', !!S.orcAcumular); salvar(); render(); toast(S.orcAcumular ? 'Sobras passam a acumular a partir deste mês ✓' : 'Acúmulo desligado'); return; }
+  if (a==='tom'){ S.tom = t.dataset.v; salvar(); render(); toast(S.tom === 'sincero' ? 'Modo sincero ligado 😏' : 'Modo gentil ligado 🙂'); return; }
+  if (a==='rendaVariavel'){ abrirRendaVariavel(); return; }
+  if (a==='salvarRenda'){ const v = parseValor(document.getElementById('rvSegura').value); if (!(v > 0)) return toast('Informe a renda segura'); S.rendaVariavel = { ativo:true, segura:v }; salvar(); fechar(); render(); toast('Renda variável ativada ✓'); return; }
+  if (a==='desligarRenda'){ S.rendaVariavel = { ...(S.rendaVariavel||{}), ativo:false }; salvar(); fechar(); render(); toast('Renda variável desligada'); return; }
+  if (a==='guardarExcedente'){ const v = +t.dataset.v; abrirForm('reservas'); setTimeout(() => { const i = document.getElementById('fValor'); if (i) i.value = moneyVal(v); }, 60); return; }
+  if (a==='organizar'){ abrirOrganizar(); return; }
+  if (a==='orgCat'){ const g = mes(cur.y,cur.m).gastos.find(x => x.id === t.dataset.id); if (g){ g.cat = t.dataset.c; g.essencial = ESSENCIAIS.includes(g.cat); salvar(); } abrirOrganizar(); return; }
   if (a==='colar'){ abrirColar(); return; }
   if (a==='colarLancar'){ lancarTexto(document.getElementById('cTexto').value); return; }
   if (a==='colarLer'){ navigator.clipboard.readText().then(x => { document.getElementById('cTexto').value = x; if (interpretarTextoBanco(x)) lancarTexto(x); else toast('Não encontrei um valor (R$) no que você copiou'); }).catch(() => toast('Não consegui ler. Toque no campo e use Colar.')); return; }
@@ -3309,6 +3418,8 @@ function dadosDemo(){
       const pago = off < 0 || venc < hojeDia;
       M.contas.push({ id:uid(), nome, planejado:Math.round(v), valor:pago?v:0, pago, data:pago?dia(venc):'', venc });
     });
+    if (off === -4){ M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'reserva', valor:3000, nome:'Saldo inicial', data:dia(1) });
+      M.reservas.push({ id:uid(), tipo:'Renda Fixa', valor:2500, nome:'CDB', data:dia(1) }); }
     if (6 <= lim){ M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'reserva', valor:300, nome:'Nubank', data:dia(6) });
       M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'viagem', valor:250, nome:'', data:dia(6) }); }
     if (off === -1) M.reservas.push({ id:uid(), tipo:'Cofrinho', cof:'note', valor:400, nome:'', data:dia(28) });
