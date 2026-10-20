@@ -52,6 +52,28 @@ module.exports = async (req, res) => {
       lista.sort((a, b) => b.em.localeCompare(a.em));
       return res.json({ ok: true, lista });
     }
+    if (acao === 'metricas') {
+      // Junta compradores (codigos) e uso (usos) sem expor e-mails: só datas e contagens por pessoa.
+      const [cods, usos, deps, nLista, nPush, compras, reemb, charg, valor] = await Promise.all([
+        redis('HGETALL', 'codigos'), redis('HGETALL', 'usos'), redis('HGETALL', 'depoimentos'), redis('HLEN', 'lista'),
+        redis('HLEN', 'push'), redis('HGETALL', 'met:compra'), redis('HGETALL', 'met:reembolso'), redis('HGETALL', 'met:chargeback'), redis('HGETALL', 'met:valor')]);
+      const par = (a) => { const o = {}; for (let i = 0; i < (a || []).length; i += 2) o[a[i]] = a[i + 1]; return o; };
+      const U = par(usos), pessoas = [];
+      for (const [conta, bruto] of Object.entries(par(cods))) {
+        let c = {}, u = null; try { c = JSON.parse(bruto); } catch (e) {}
+        try { u = U[conta] ? JSON.parse(U[conta]) : null; } catch (e) {}
+        const info = Object.values((u && u.info) || {});
+        pessoas.push({ criado: c.criado || null, cakto: c.origem === 'cakto', ativou: !!u, ativouEm: u ? u.em : null,
+          visto: info.map((i) => i.visto || i.em).filter(Boolean).sort().pop() || (u ? u.em : null),
+          apar: info.length, inst: info.filter((i) => /instalado/i.test(i.nome || '')).length,
+          ios: info.filter((i) => /iPhone|iPad/.test(i.nome || '')).length, android: info.filter((i) => /Android/.test(i.nome || '')).length });
+      }
+      let nuvem = 0, cursor = '0';
+      do { const r = await redis('SCAN', cursor, 'MATCH', 'nuvem:*', 'COUNT', '1000'); cursor = String(r[0]); nuvem += r[1].length; } while (cursor !== '0');
+      const notas = Object.values(par(deps)).map((d) => { try { return JSON.parse(d).nota; } catch (e) { return 0; } }).filter(Boolean);
+      return res.json({ ok: true, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valor) },
+        totais: { lista: nLista, push: nPush, nuvem, depoimentos: notas.length, notaMedia: notas.length ? notas.reduce((a, b) => a + b, 0) / notas.length : null } });
+    }
     if (acao === 'lista') {
       const d = (await redis('HGETALL', 'lista')) || [];
       const lista = [];

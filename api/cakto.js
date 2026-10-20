@@ -10,6 +10,19 @@ function secretOk(recebido) {
   return certo.length > 0 && certo.length === veio.length && crypto.timingSafeEqual(certo, veio);
 }
 
+// Métricas por dia (horário de Brasília): compras, reembolsos e chargebacks.
+// Nunca derruba o webhook: qualquer erro aqui é ignorado. Eventos repetidos (mesmo pedido) contam uma vez só.
+async function registrar(tipo, dados) {
+  try {
+    const dia = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+    const id = String(dados.refId || dados.id || '');
+    if (id && !(await redis('HSETNX', 'met:pedidos', tipo + ':' + id, dia))) return;
+    await redis('HINCRBY', 'met:' + tipo, dia, 1);
+    const valor = [dados.amount, dados.baseAmount].map(Number).find((v) => v > 0);
+    if (valor && tipo === 'compra') await redis('HINCRBYFLOAT', 'met:valor', dia, String(valor));
+  } catch (e) { /* métrica é secundária */ }
+}
+
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   const corpo = req.body || {};
@@ -27,10 +40,12 @@ module.exports = async (req, res) => {
         criado: new Date().toISOString(),
         origem: 'cakto',
       }));
+      await registrar('compra', dados);
     } else if (corpo.event === 'refund' || corpo.event === 'chargeback') {
       await redis('HDEL', 'codigos', email);
       await redis('HDEL', 'usos', email);
       await redis('DEL', 'nuvem:' + email);   // backup na nuvem de quem foi reembolsado
+      await registrar(corpo.event === 'refund' ? 'reembolso' : 'chargeback', dados);
     }
     res.status(200).json({ ok: true });
   } catch (e) {

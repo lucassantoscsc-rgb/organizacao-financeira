@@ -39,6 +39,20 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
 .dep .acts{display:flex;gap:6px;margin-top:8px}
 .tag.ok{background:#e6faf6;color:var(--good)}.tag.no{background:#f0f2f2;color:var(--muted)}
 #msg{color:var(--bad);font-size:14px;margin-top:8px}
+main{max-width:760px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.kpi{background:var(--bg);border-radius:14px;padding:12px 14px}
+.kpi span{display:block;font-size:12.5px;color:var(--muted)}
+.kpi b{display:block;font-size:22px;font-variant-numeric:tabular-nums;margin-top:2px}
+.kpi small{display:block;font-size:12px;color:var(--muted);margin-top:2px}
+.kpi.bom b{color:var(--good)}.kpi.ruim b{color:var(--bad)}
+.secao{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 0 8px}
+.grafico{width:100%;height:auto;display:block}
+.grafico .barra{fill:var(--mint)}.grafico .barra:hover{fill:var(--deep)}
+.grafico text{font-size:10px;fill:var(--muted)}
+.preco{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
+.preco input{width:90px;padding:6px 10px}
+.aviso{font-size:12.5px;color:var(--muted);margin-top:8px}
 </style>
 </head>
 <body>
@@ -52,6 +66,10 @@ button.del{background:#fde8e9;color:var(--bad);font-weight:500;padding:8px 12px;
   </div>
 
   <div id="painel" hidden>
+    <div class="card" id="cardMetricas">
+      <h2 style="display:flex;justify-content:space-between;align-items:center">📊 Métricas <span class="preco">Preço do app R$ <input id="preco" type="number" step="0.01" value="27"></span></h2>
+      <div id="metricas"><p class="stats">Carregando…</p></div>
+    </div>
     <div class="card">
       <h2>Gerar código manual <span style="font-weight:400;color:var(--muted)">(vendas fora da Cakto, brindes)</span></h2>
       <label for="nota">Nome ou e-mail do cliente (opcional)</label>
@@ -107,7 +125,73 @@ async function entrar(){
 const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const data = iso => iso ? new Date(iso).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : '';
 
-async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); carregarLista(); }
+async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); carregarLista(); carregarMetricas(); }
+
+/* ---------- métricas ----------
+   Datas no horário de Brasília. Vendas por dia vêm dos compradores ativos (data da compra); reembolsos e
+   chargebacks só passaram a ser registrados em 20/10/2026, por isso aparecem a partir dessa data. */
+let met = null;
+const diaBR = (iso) => new Date(new Date(iso).getTime() - 3*3600e3).toISOString().slice(0,10);
+const hojeBR = () => diaBR(new Date().toISOString());
+const menosDias = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() - n); return x.toISOString().slice(0,10); };
+const brl = (v) => 'R$ ' + (v||0).toLocaleString('pt-BR', { minimumFractionDigits:2, maximumFractionDigits:2 });
+const pct = (a, b) => b ? Math.round(a / b * 100) + '%' : '—';
+async function carregarMetricas(){ met = await api({acao:'metricas'}); desenharMetricas(); }
+function desenharMetricas(){
+  if (!met) return;
+  const preco = +document.getElementById('preco').value || 27;
+  try { localStorage.setItem('admPreco', preco); } catch(e){}
+  const hoje = hojeBR(), compradores = met.pessoas.filter(p => p.cakto && p.criado);
+  const porDia = {}; compradores.forEach(p => { const d = diaBR(p.criado); porDia[d] = (porDia[d]||0) + 1; });
+  const soma = (n) => { let t = 0; for (let i = 0; i < n; i++) t += porDia[menosDias(hoje, i)] || 0; return t; };
+  const v1 = porDia[hoje] || 0, vOntem = porDia[menosDias(hoje,1)] || 0, v7 = soma(7), v30 = soma(30), vTot = compradores.length;
+  const ev = met.eventos, somaEv = (o) => Object.values(o||{}).reduce((a,b)=>a+(+b||0),0);
+  const reemb = somaEv(ev.reembolso), charg = somaEv(ev.chargeback), comprasReg = somaEv(ev.compra);
+  const todos = met.pessoas, ativaram = todos.filter(p => p.ativou);
+  const desde = (iso, n) => iso && (Date.now() - new Date(iso).getTime()) <= n*864e5;
+  const at7 = ativaram.filter(p => desde(p.visto, 7)).length, at30 = ativaram.filter(p => desde(p.visto, 30)).length;
+  // retenção: dos que ativaram há 30+ dias, quantos usaram nos últimos 7
+  const antigos = ativaram.filter(p => p.ativouEm && !desde(p.ativouEm, 30)), ret = antigos.filter(p => desde(p.visto, 7)).length;
+  const apar = ativaram.reduce((a,p)=>a+p.apar,0), inst = ativaram.reduce((a,p)=>a+p.inst,0), ios = ativaram.reduce((a,p)=>a+p.ios,0), andr = ativaram.reduce((a,p)=>a+p.android,0);
+  const T = met.totais;
+  const k = (rot, val, sub, cls) => `<div class="kpi ${cls||''}"><span>${rot}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+  // gráfico de vendas dos últimos 30 dias
+  const dias = []; for (let i = 29; i >= 0; i--) dias.push(menosDias(hoje, i));
+  const max = Math.max(1, ...dias.map(d => porDia[d]||0)), Wg = 700, Hg = 170, bw = Wg / 30;
+  const barras = dias.map((d, i) => { const v = porDia[d]||0, h = v / max * (Hg - 34);
+    return `<g><title>${d.split('-').reverse().slice(0,2).join('/')}: ${v} venda${v===1?'':'s'}</title><rect class="barra" x="${i*bw+3}" y="${Hg-18-h}" width="${bw-6}" height="${Math.max(h, v?2:0)}" rx="3"/>${v && (i%3===2 || v===max) ? `<text x="${i*bw+bw/2}" y="${Hg-22-h}" text-anchor="middle">${v}</text>` : ''}${i%5===4 ? `<text x="${i*bw+bw/2}" y="${Hg-4}" text-anchor="middle">${d.slice(8)}/${d.slice(5,7)}</text>` : ''}</g>`; }).join('');
+  document.getElementById('metricas').innerHTML = `
+    <div class="secao">Vendas do app (Cakto)</div>
+    <div class="kpis">
+      ${k('Hoje', v1, `ontem: ${vOntem}`)}${k('Últimos 7 dias', v7, `${(v7/7).toFixed(1).replace('.',',')} por dia`)}
+      ${k('Últimos 30 dias', v30, brl(v30*preco) + ' estimado')}${k('Total', vTot, brl(vTot*preco) + ' estimado')}
+    </div>
+    <svg class="grafico" viewBox="0 0 ${Wg} ${Hg}" role="img" aria-label="Vendas por dia nos últimos 30 dias">${barras}</svg>
+    <div class="secao">Qualidade</div>
+    <div class="kpis">
+      ${k('Reembolsos', reemb, comprasReg ? pct(reemb, comprasReg) + ' das compras registradas' : 'desde 20/10', reemb && comprasReg && reemb/comprasReg >= .05 ? 'ruim' : '')}
+      ${k('Chargebacks', charg, 'desde 20/10', charg ? 'ruim' : '')}
+      ${k('Nota dos depoimentos', T.notaMedia ? T.notaMedia.toFixed(1).replace('.',',') + ' ★' : '—', `${T.depoimentos} avaliaç${T.depoimentos===1?'ão':'ões'}`)}
+    </div>
+    <div class="secao">Uso do app</div>
+    <div class="kpis">
+      ${k('Ativaram o app', pct(ativaram.length, todos.length), `${ativaram.length} de ${todos.length} com acesso`, ativaram.length/Math.max(1,todos.length) >= .8 ? 'bom' : '')}
+      ${k('Ativos em 7 dias', at7, pct(at7, ativaram.length) + ' de quem ativou')}
+      ${k('Ativos em 30 dias', at30, pct(at30, ativaram.length) + ' de quem ativou')}
+      ${k('Retenção 30+ dias', antigos.length ? pct(ret, antigos.length) : '—', antigos.length ? `${ret} de ${antigos.length} ainda usam` : 'aparece após 30 dias de vendas', antigos.length && ret/antigos.length >= .4 ? 'bom' : '')}
+    </div>
+    <div class="kpis">
+      ${k('Aparelhos por cliente', ativaram.length ? (apar/ativaram.length).toFixed(1).replace('.',',') : '—', `${apar} no total`)}
+      ${k('App instalado', pct(inst, apar), 'dos aparelhos (resto usa no navegador)')}
+      ${k('iPhone × Android', `${pct(ios, apar)} × ${pct(andr, apar)}`, 'dos aparelhos')}
+      ${k('Notificações', T.push, 'aparelhos com lembretes')}
+      ${k('Backup na nuvem', T.nuvem, pct(T.nuvem, ativaram.length) + ' de quem ativou')}
+      ${k('Lista de espera', T.lista, 'Tino Conectado')}
+    </div>
+    <p class="aviso">Vendas por dia contam quem tem acesso hoje (compras reembolsadas saem da contagem). Reembolsos e chargebacks passaram a ser registrados em 20/10/2026. "Ativo" = abriu o app com internet no período (o app confere o acesso uma vez por dia).</p>`;
+}
+document.addEventListener('input', e => { if (e.target.id === 'preco') desenharMetricas(); });
+try { const p = localStorage.getItem('admPreco'); if (p) setTimeout(() => { const i = document.getElementById('preco'); if (i) i.value = p; }, 0); } catch(e){}
 let espera = [];
 const PRECO_TXT = { ate10:'até R$9,90', ate15:'até R$14,90', ate20:'até R$19,90', mais20:'mais de R$20', nao:'não pagaria', '':'não respondeu' };
 async function carregarLista(){ espera = (await api({acao:'lista'})).lista; desenharLista(); }
