@@ -1517,8 +1517,9 @@ async function syncAgora(modo, manual){
     let cursor = st.cursor || 0;
     const local = modo === 'nuvem' ? {} : achatar(S);
     let mudancas = [];
+    // Ao juntar, envia só os itens: a ordem das listas e as configurações ficam as da nuvem.
     if (modo !== 'nuvem'){
-      Object.entries(local).forEach(([k, v]) => { if (modo === 'juntar' && k.startsWith('v|')) return; const h = hashVal(v); if (hashes[k] !== h) mudancas.push({ k, v, h }); });
+      Object.entries(local).forEach(([k, v]) => { if (modo === 'juntar' && !k.startsWith('i|')) return; const h = hashVal(v); if (hashes[k] !== h) mudancas.push({ k, v, h }); });
       if (modo !== 'juntar') Object.keys(hashes).forEach(k => { if (!(k in local)) mudancas.push({ k, d:true }); });
     }
     const recebidos = [];
