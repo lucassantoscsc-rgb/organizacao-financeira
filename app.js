@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 46;
+const APP_VERSAO = 47;
 const STORE_KEY = 'orgfin:v1';
 // Dados de contas que saíram ficam guardados em 'orgfin:conta:<e-mail ou código>' e voltam ao entrar de novo.
 const CONTA_KEY = (id) => 'orgfin:conta:' + (id || '_sem');
@@ -1084,6 +1084,31 @@ function entrarLista(btn){
     .catch(() => { btn.disabled = false; btn.textContent = 'Entrar na lista de espera'; toast('Não foi possível enviar. Confira a internet.'); });
 }
 
+/* ---------- excluir conta ----------
+   Exigido pelas lojas de apps. Apaga os dados do servidor (api/excluir.js) e todos os dados deste aparelho. */
+function abrirExcluirConta(){
+  abrir(`<h2>Excluir minha conta</h2>
+    <p class="note" style="margin:0 0 10px">Isso apaga <b>todos os seus lançamentos neste aparelho</b> e, no nosso servidor, seus aparelhos conectados, notificações, backup na nuvem, depoimento e inscrição na lista de espera.</p>
+    <p class="note" style="margin:0 0 10px">Guardamos só o registro da sua compra (e-mail e data), como comprovante. Se um dia quiser voltar, é só entrar com o mesmo e-mail: o acesso que você pagou continua valendo, mas o app começa do zero.</p>
+    <p class="note" style="margin:0 0 14px">Se quiser guardar seus dados antes, faça um <b>backup em arquivo</b> em Ajustes.</p>
+    <div class="f"><label>Para confirmar, digite EXCLUIR</label><input id="exConf" autocomplete="off" autocapitalize="characters"></div>
+    <button class="btn dan" data-act="excluirConfirmar">Excluir minha conta definitivamente</button>
+    <button class="btn sec" data-act="fechar">Cancelar</button>`);
+}
+async function excluirConta(btn){
+  if ((document.getElementById('exConf').value || '').trim().toUpperCase() !== 'EXCLUIR') return toast('Digite EXCLUIR para confirmar');
+  if (!navigator.onLine) return toast('Conecte-se à internet para excluir a conta');
+  btn.disabled = true; btn.textContent = 'Excluindo…';
+  try {
+    const r = await fetch('api/excluir', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ conta:S.conta, aparelho:idAparelho() }) });
+    if (!r.ok) throw 0;
+  } catch(e){ btn.disabled = false; btn.textContent = 'Excluir minha conta definitivamente'; return toast('Não foi possível excluir agora. Tente de novo ou fale com o suporte.'); }
+  // Só os dados desta conta: outras contas guardadas neste aparelho continuam intactas.
+  try { [STORE_KEY, CONTA_KEY(S.conta), NUVEM_KEY(S.conta)].forEach(k => localStorage.removeItem(k)); } catch(e){}
+  S = novoEstado(); aba = 'resumo'; fechar(); render();
+  alert('Sua conta foi excluída. Obrigado por ter usado o Tino.');
+}
+
 /* ---------- central de ajuda ---------- */
 const PERGUNTAS_AJUDA = [
   ['📲 Como instalo o app na tela de início?', 'No <b>iPhone</b>, abra o link no Safari, toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> e depois em <b>Adicionar à Tela de Início</b>. No <b>Android</b>, abra no Chrome, toque no menu <span class="kbd">⋮</span> e em <b>Instalar app</b>. Depois, abra sempre pelo ícone do Tino.'],
@@ -1113,7 +1138,8 @@ function abrirAjuda(){
     ${l.whats ? `<a class="btn pri" href="${l.whats}" target="_blank" rel="noopener">💬 Falar no WhatsApp</a>` : ''}
     <a class="btn ${l.whats?'sec':'pri'}" href="${l.email}">✉️ Enviar e-mail para o suporte</a>
     <p class="note" style="text-align:center">${esc(CONFIG.suporteEmail)}</p>
-    <button class="btn sec" data-act="ajudaTour">🎓 Ver o tutorial de novo</button>`);
+    <button class="btn sec" data-act="ajudaTour">🎓 Ver o tutorial de novo</button>
+    <p class="note" style="text-align:center;margin-top:14px"><a href="privacidade.html" target="_blank" rel="noopener">Política de privacidade</a> · <a href="termos.html" target="_blank" rel="noopener">Termos de uso</a></p>`);
 }
 
 /* ---------- pedido de depoimento ----------
@@ -2640,7 +2666,8 @@ function telaAjustes(){
   <section class="card"><h3>Conta</h3>
     <p class="note" style="margin:0 0 12px">${S.conta ? `Conectado como <b>${esc(S.conta)}</b>` : 'Conectado neste aparelho'}. Ao sair, seus dados ficam guardados aqui e voltam quando você entrar de novo com o mesmo e-mail. Entrando com outro e-mail, o app começa do zero, com dados separados.</p>
     ${S.conta ? '<button class="btn sec" data-act="aparelhos">📱 Aparelhos conectados</button>' : '<p class="note" style="margin:0 0 12px">Para ver e gerenciar seus aparelhos, saia e entre de novo com seu e-mail (seus dados ficam guardados).</p>'}
-    <button class="btn sec" data-act="sair">Sair da conta</button></section>
+    <button class="btn sec" data-act="sair">Sair da conta</button>
+    ${S.conta && !DEMO ? '<button class="link-sutil" data-act="excluirConta">Excluir minha conta</button>' : ''}</section>
   <section class="card" id="cardAjuda"><h3>Ajuda e suporte</h3>
     <p class="note" style="margin:0 0 12px">Dúvidas sobre instalar, trocar de celular, backup, Face ID ou notificações? As respostas estão aqui, e você pode falar com a gente.</p>
     <button class="btn pri" data-act="ajuda">❓ Central de ajuda</button>
@@ -2876,6 +2903,8 @@ document.addEventListener('click', e=>{
   }
   const a = t.dataset.act;
   if (a==='fechar'){ fechar(); return; }
+  if (a==='excluirConta'){ abrirExcluirConta(); return; }
+  if (a==='excluirConfirmar'){ excluirConta(t); return; }
   if (a==='orcAcum'){ S.orcAcumular = S.orcAcumular ? null : { desde: key(prevYM(hoje.getFullYear(), hoje.getMonth()).y, prevYM(hoje.getFullYear(), hoje.getMonth()).m) }; t.classList.toggle('on', !!S.orcAcumular); salvar(); render(); toast(S.orcAcumular ? 'Sobras passam a acumular a partir deste mês ✓' : 'Acúmulo desligado'); return; }
   if (a==='tom'){ S.tom = t.dataset.v; salvar(); render(); toast(S.tom === 'sincero' ? 'Modo sincero ligado 😏' : 'Modo gentil ligado 🙂'); return; }
   if (a==='rendaVariavel'){ abrirRendaVariavel(); return; }
@@ -3434,7 +3463,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
