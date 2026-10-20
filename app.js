@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 49;
+const APP_VERSAO = 50;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -985,7 +985,7 @@ function cardPassos(){
     <div class="bar" style="margin-bottom:12px"><div style="width:${feitos / ps.length * 100}%"></div></div>
     ${ps.map((p, i) => `<button class="passo ${p.feito ? 'ok' : ''}" data-act="${p.act}" ${p.feito ? 'disabled' : ''}>
       <span class="passo-n">${p.feito ? '✓' : i + 1}</span><span class="passo-t"><b>${p.t}</b><small>${p.s}</small></span>${p.feito ? '' : '<span class="passo-seta">›</span>'}</button>`).join('')}
-    <div class="passos-pe"><button class="link-sutil" data-act="ajuda">Precisa de ajuda?</button><button class="link-sutil" data-act="passosFechar">Ocultar</button></div>
+    <div class="passos-pe"><button class="link-sutil" data-act="ajuda">Precisa de ajuda?</button>${S.conta && !S.indicadoInformado ? '<button class="link-sutil" data-act="indiqueUsar">Alguém te indicou?</button>' : ''}<button class="link-sutil" data-act="passosFechar">Ocultar</button></div>
   </section>`;
 }
 // Sai do modo simples sozinho depois de 7 dias com pelo menos 5 lançamentos.
@@ -1305,8 +1305,69 @@ function enviarNps(){
     conta:S.conta, aparelho:idAparelho(), nota:npsNotaSel, texto:document.getElementById('npsTexto').value.trim(), versao:APP_VERSAO }) })
     .then(r => { if (!r.ok) throw 0;
       S.nps = { ...(S.nps||{}), enviado:true, nota:npsNotaSel }; salvar(); fechar();
-      toast(npsNotaSel >= 9 ? 'Obrigado! Ficamos muito felizes 💚' : 'Obrigado! Vamos usar sua resposta para melhorar.'); })
+      if (npsNotaSel >= 9 && podeIndicar()) setTimeout(() => abrirIndique('Que bom que você gosta do Tino! 💚 Que tal indicar para alguém? Seu amigo ganha desconto e você ganha um presente.'), 400);
+      else toast(npsNotaSel >= 9 ? 'Obrigado! Ficamos muito felizes 💚' : 'Obrigado! Vamos usar sua resposta para melhorar.'); })
     .catch(() => { btn.disabled = false; btn.textContent = 'Enviar'; toast('Não foi possível enviar. Confira a internet e tente de novo.'); });
+}
+
+/* ---------- indique e ganhe ----------
+   O amigo paga R$ 20 em vez de R$ 27 com o cupom; quem indica ganha a planilha a partir do primeiro amigo que comprar.
+   Código, contagem e link da planilha vêm do servidor (api/indique). No endereço de teste o código é de exemplo. */
+const LINK_INDIQUE = LINK_COMPRA + '/app?ref=';
+let indique = null;
+function podeIndicar(){ return !DEMO && !!(S.conta || TESTE); }
+function cardIndique(){
+  if (!podeIndicar() || S.indiqueOculto || S.indiqueVisto || new Set(S.diasAtivos||[]).size < 5) return '';
+  return `<div class="alert info backup"><span>🎁</span><div><b>Indique o Tino e ganhe a planilha</b><br>Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira.
+    <div class="acts"><button class="btn sec" data-act="indique">Ver meu convite</button><button class="btn sec" data-act="indiqueOcultar">Agora não</button></div></div></div>`;
+}
+const postIndique = (dados) => fetch('api/indique', { method:'POST', headers:{'Content-Type':'application/json'},
+  body: JSON.stringify({ conta:S.conta, aparelho:idAparelho(), ...dados }) }).then(r => r.ok ? r.json() : Promise.reject());
+async function abrirIndique(intro){
+  abrir(`<h2>🎁 Indique e ganhe</h2><p class="note">Carregando seu convite…</p>`);
+  try {
+    indique = TESTE && !S.conta ? { codigo:'TESTE7K', amigos:0, cupom:'AMIGOTINO', planilha:'', indicado:true, exemplo:true }
+      : await postIndique({ acao:'meu', nome:S.perfil.nome });
+  } catch(e){
+    abrir(`<h2>🎁 Indique e ganhe</h2><p class="note" style="margin:0 0 14px">Não foi possível carregar seu convite. Confira a internet e tente de novo.</p><button class="btn sec" data-act="fechar">Fechar</button>`); return;
+  }
+  if (!$ov.classList.contains('open')) return;   // a pessoa fechou enquanto carregava
+  const I = indique;
+  if (!S.indiqueVisto || (I.indicado && S.conta && !S.indicadoInformado)){ S.indiqueVisto = true; if (I.indicado && S.conta) S.indicadoInformado = true; salvar(); render(); }
+  abrir(`<h2>🎁 Indique e ganhe</h2>
+    ${intro ? `<p class="note" style="margin:-4px 0 12px">${intro}</p>` : ''}
+    <div class="ind-passos">
+      <div><b>1</b><span>Mande o seu convite para um amigo</span></div>
+      <div><b>2</b><span>Ele paga <b>R$ 20</b> em vez de R$ 27 com o cupom <b>${esc(I.cupom)}</b></span></div>
+      <div><b>3</b><span>Você ganha a <b>Planilha de Organização Financeira</b> (R$ 17) quando o primeiro amigo comprar</span></div>
+    </div>
+    <div class="ind-cod"><small>Seu código</small><b>${esc(I.codigo)}</b></div>
+    ${I.exemplo ? '<p class="note" style="margin:0 0 12px;text-align:center">No endereço de teste o código é só um exemplo.</p>' : ''}
+    <button class="btn pri" data-act="indiqueEnviar">📲 Enviar convite</button>
+    <button class="btn sec" data-act="indiqueCopiar">Copiar link</button>
+    <p class="ind-placar">${I.amigos ? `🎉 <b>${I.amigos} amigo${I.amigos>1?'s':''}</b> já compr${I.amigos>1?'aram':'ou'} com o seu convite` : 'Nenhum amigo comprou com o seu convite ainda.'}</p>
+    ${I.planilha ? `<a class="btn pri" href="${esc(I.planilha)}" target="_blank" rel="noopener">📊 Pegar minha planilha</a>` : I.amigos ? '<p class="note" style="text-align:center">Sua planilha está sendo preparada e logo aparece aqui.</p>' : ''}
+    <p class="note" style="margin:14px 0 0">Se o amigo não usar o seu link, peça para ele digitar o seu código no app (Ajustes → Indique e ganhe) em até 30 dias depois da compra.</p>
+    ${!I.indicado ? '<button class="link-sutil" data-act="indiqueUsar">Alguém te indicou? Digite o código</button>' : ''}`);
+}
+function textoConvite(){ return `Estou usando o Tino Finanças para organizar meu dinheiro. Com o meu convite você paga R$ 20 em vez de R$ 27 (cupom ${indique.cupom}): ${LINK_INDIQUE + indique.codigo}`; }
+function abrirUsarIndicacao(){
+  abrir(`<h2>Quem te indicou?</h2>
+    <p class="note" style="margin:-4px 0 14px">Digite o código de quem te indicou o Tino. Assim essa pessoa ganha o presente dela. Vale até 30 dias depois da compra.</p>
+    <div class="f"><label>Código</label><input id="indCod" maxlength="12" autocapitalize="characters" autocomplete="off" placeholder="Ex.: ANA7KQ" style="text-transform:uppercase"></div>
+    <button class="btn pri" data-act="indiqueConfirmar">Confirmar</button>
+    <button class="btn sec" data-act="fechar">Cancelar</button>`);
+  setTimeout(() => { const el = document.getElementById('indCod'); if (el) el.focus(); }, 250);
+}
+function confirmarIndicacao(btn){
+  const codigo = document.getElementById('indCod').value.trim();
+  if (codigo.length < 4) return toast('Digite o código completo');
+  if (TESTE && !S.conta) return toast('No endereço de teste não dá para confirmar códigos');
+  btn.disabled = true; btn.textContent = 'Confirmando…';
+  postIndique({ acao:'usar', codigo }).then(d => {
+    if (!d.ok){ btn.disabled = false; btn.textContent = 'Confirmar'; return toast(d.erro || 'Não foi possível confirmar'); }
+    S.indicadoInformado = true; salvar(); fechar(); render(); toast('Pronto! Obrigado por informar 💚');
+  }).catch(() => { btn.disabled = false; btn.textContent = 'Confirmar'; toast('Não foi possível confirmar. Confira a internet.'); });
 }
 
 /* ---------- categorias do cliente ---------- */
@@ -2055,6 +2116,7 @@ function telaResumo(){
 
   html += cardTagAtiva();
   html += cardRetro();
+  html += cardIndique();
   html += dicaTransferir();
   html += lembreteBackup();
   if (!S.listaDispensada && !precisaBackup() && !S.modoSimples) html += cardConectado();
@@ -2810,6 +2872,10 @@ function telaAjustes(){
     <div class="f"><label>Quero ser chamado(a) de</label><input id="pNome" value="${esc(p.nome)}"></div>
     <div class="f"><label>Meus pronomes são</label><select id="pPron">${['Masculinos','Femininos','Neutros'].map(o=>`<option ${o===p.pronome?'selected':''}>${o}</option>`).join('')}</select></div>
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
+  ${podeIndicar() ? `<section class="card"><h3>🎁 Indique e ganhe</h3>
+    <p class="note" style="margin:0 0 12px">Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira quando ele comprar.</p>
+    <button class="btn pri" data-act="indique">Ver meu convite</button>
+    ${S.conta && !S.indicadoInformado ? '<button class="link-sutil" data-act="indiqueUsar">Alguém te indicou? Digite o código</button>' : ''}</section>` : ''}
   <section class="card"><h3>Tela inicial</h3>
     <div class="switch"><span>Modo simples <small class="muted">(só o essencial na tela inicial)</small></span><button class="tg ${S.modoSimples?'on':''}" data-act="modoSimplesTg" aria-label="Modo simples"></button></div></section>
   <section class="card"><h3>Categorias</h3>
@@ -3128,6 +3194,15 @@ document.addEventListener('click', e=>{
   if (a==='npsNota'){ npsNota(+t.dataset.v); return; }
   if (a==='npsEnviar'){ enviarNps(); return; }
   if (a==='npsDepois'){ S.nps = { ...(S.nps||{}), vezes:((S.nps||{}).vezes||0)+1, depoisDe: new Date(Date.now()+14*864e5).toISOString() }; salvar(); fechar(); return; }
+  if (a==='indique'){ abrirIndique(); return; }
+  if (a==='indiqueOcultar'){ S.indiqueOculto = true; salvar(); render(); return; }
+  if (a==='indiqueEnviar'){ const txt = textoConvite();
+    if (navigator.share) navigator.share({ text: txt }).catch(()=>{});
+    else navigator.clipboard.writeText(txt).then(()=>toast('Convite copiado. Cole no WhatsApp.')).catch(()=>toast('Não foi possível copiar.'));
+    return; }
+  if (a==='indiqueCopiar'){ navigator.clipboard.writeText(LINK_INDIQUE + indique.codigo).then(()=>toast('Link copiado ✓')).catch(()=>toast('Não foi possível copiar.')); return; }
+  if (a==='indiqueUsar'){ abrirUsarIndicacao(); return; }
+  if (a==='indiqueConfirmar'){ confirmarIndicacao(t); return; }
   if (a==='categorias'){ abrirCategorias(); return; }
   if (a==='catNova'){ abrirCatForm(-1); return; }
   if (a==='catEditar'){ abrirCatForm(+t.dataset.i); return; }
@@ -3656,7 +3731,7 @@ function dadosDemo(){
   return D;
 }
 // Na demonstração, ações que dependem de conta, servidor ou dos dados reais ficam desligadas.
-const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
+const BLOQ_DEMO = new Set(['excluirConta','listaAbrir','nuvemAtivar','nuvemRestaurar','nuvemAgora','depoimento','depoEnviar','npsEnviar','indique','indiqueUsar','exportar','importar','sair','aparelhos','criarSenha','trocarSenha','removerSenha','bio','notif','notifTeste','zerar']);
 
 function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);

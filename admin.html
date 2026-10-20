@@ -207,6 +207,7 @@ function desenharMetricas(){
       ${k('Backup na nuvem', T.nuvem, pct(T.nuvem, ativaram.length) + ' de quem ativou')}
       ${k('Lista de espera', T.lista, 'Tino Conectado')}
     </div>
+    ${blocoIndique(met.indique, vTot)}
     ${blocoNps(N, prom, detr)}
     ${blocoErros(met.erros || [])}
     <p class="aviso">Vendas por dia contam quem tem acesso hoje (compras reembolsadas saem da contagem). Reembolsos e chargebacks passaram a ser registrados em 20/10/2026. "Ativo" = abriu o app com internet no período (o app confere o acesso uma vez por dia).</p>`;
@@ -214,6 +215,34 @@ function desenharMetricas(){
 document.addEventListener('input', e => { if (e.target.id === 'preco' || e.target.id === 'taxa') desenharMetricas(); });
 try { const p = localStorage.getItem('admPreco'), tx = localStorage.getItem('admTaxa'); setTimeout(() => { if (p) document.getElementById('preco').value = p; if (tx) document.getElementById('taxa').value = tx; }, 0); } catch(e){}
 
+/* Indique e ganhe: configuração (cupom e link da planilha) e quem já indicou. */
+function blocoIndique(I, vTot){
+  if (!I) return '';
+  const L = I.indicacoes || [], porDono = {};
+  L.forEach(x => porDono[x.dono] = (porDono[x.dono]||0) + 1);
+  const top = Object.entries(porDono).sort((a,b) => b[1]-a[1]).slice(0, 10);
+  const viaCheckout = L.filter(x => x.via === 'checkout').length;
+  const k = (rot, val, sub) => `<div class="kpi"><span>${rot}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+  return `<div class="secao">🎁 Indique e ganhe</div>
+    <form class="ads-form" onsubmit="salvarIndique(event)">
+      <div><label for="indCupom">Cupom do amigo (R$ 7 off na Cakto)</label><input id="indCupom" value="${esc(I.cupom)}" style="width:150px;text-transform:uppercase"></div>
+      <div style="flex:1;min-width:220px"><label for="indPlanilha">Link de entrega da planilha (brinde)</label><input id="indPlanilha" value="${esc(I.planilha)}" placeholder="https://..." style="width:100%"></div>
+      <button type="submit">Salvar</button>
+    </form>
+    ${I.planilha ? '' : '<p class="aviso" style="margin:-4px 0 12px;color:var(--warn)">⚠️ Cole o link da planilha: sem ele, quem indicar não recebe o brinde.</p>'}
+    <div class="kpis">
+      ${k('Indicações que viraram venda', L.length, vTot ? pct(L.length, vTot) + ' das vendas' : '')}
+      ${k('Pelo link', viaCheckout, `${L.length - viaCheckout} pelo código no app`)}
+      ${k('Clientes com convite', I.codigos, 'abriram o Indique e ganhe')}
+    </div>
+    ${top.length ? `<div class="lista-ind">${top.map(([d, n]) => `<div class="item"><span>${esc(d)}</span><b>${n} amigo${n>1?'s':''}</b></div>`).join('')}</div>` : ''}`;
+}
+async function salvarIndique(e){
+  e.preventDefault();
+  const cupom = document.getElementById('indCupom').value.trim(), planilha = document.getElementById('indPlanilha').value.trim();
+  await api({ acao:'indiqueConfig', cupom, planilha });
+  met.indique.cupom = cupom.toUpperCase() || 'AMIGOTINO'; met.indique.planilha = planilha; desenharMetricas(); alert('Salvo ✓');
+}
 /* Pesquisa NPS: as respostas mais recentes. Quem deu 0 a 6 aparece com o e-mail para você chamar. */
 function blocoNps(N, prom, detr){
   if (!N.length) return '';

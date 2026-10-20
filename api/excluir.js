@@ -19,6 +19,8 @@ module.exports = async (req, res) => {
     await redis('DEL', 'nuvem:' + conta);
     await redis('HDEL', 'depoimentos', conta);
     if (conta.includes('@')) await redis('HDEL', 'lista', conta);
+    const meuCod = await redis('HGET', 'ind:cod', conta);   // código do Indique e ganhe (as compras dos amigos continuam contando)
+    if (meuCod) await redis('HDEL', 'ind:nome', meuCod);
     const push = (await redis('HGETALL', 'push')) || [];
     for (let i = 0; i < push.length; i += 2) {
       try { if (JSON.parse(push[i + 1]).conta === conta) await redis('HDEL', 'push', push[i]); } catch (e) { /* ignora registro inválido */ }

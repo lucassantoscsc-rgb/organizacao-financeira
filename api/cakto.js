@@ -3,6 +3,7 @@
 // variável CAKTO_SECRET na Vercel.
 const crypto = require('crypto');
 const { redis, normalizar } = require('./_db');
+const indique = require('./indique');
 
 function secretOk(recebido) {
   const certo = Buffer.from(process.env.CAKTO_SECRET || '');
@@ -41,11 +42,17 @@ module.exports = async (req, res) => {
         origem: 'cakto',
       }));
       await registrar('compra', dados);
+      // Indique e ganhe: a página de vendas manda "indica-CODIGO" no link do checkout (campo sck).
+      try {
+        const m = JSON.stringify(dados).match(/indica-([A-Z0-9]{4,12})/i);
+        if (m) await indique.creditar(m[1].toUpperCase(), email, 'checkout');
+      } catch (e) { /* indicação é secundária */ }
     } else if (corpo.event === 'refund' || corpo.event === 'chargeback') {
       await redis('HDEL', 'codigos', email);
       await redis('HDEL', 'usos', email);
       await redis('DEL', 'nuvem:' + email);   // backup na nuvem de quem foi reembolsado
       await registrar(corpo.event === 'refund' ? 'reembolso' : 'chargeback', dados);
+      try { await indique.desfazer(email); } catch (e) { /* indicação é secundária */ }
     }
     res.status(200).json({ ok: true });
   } catch (e) {
