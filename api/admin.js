@@ -20,7 +20,7 @@ function senhaOk(req) {
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   if (!senhaOk(req)) return res.status(401).json({ ok: false, erro: 'Senha incorreta' });
-  const { acao, nota, codigo: c } = req.body || {};
+  const { acao, nota, codigo: c, dia, valor } = req.body || {};
   const codigo = normalizar(c);
 
   try {
@@ -52,11 +52,19 @@ module.exports = async (req, res) => {
       lista.sort((a, b) => b.em.localeCompare(a.em));
       return res.json({ ok: true, lista });
     }
+    if (acao === 'anuncioSalvar') {
+      // Gasto em anúncios de um dia (soma de todas as contas). Valor 0 apaga o dia.
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ''))) return res.status(400).json({ ok: false, erro: 'Data inválida' });
+      const v = Math.round((+valor || 0) * 100) / 100;
+      if (v < 0 || v > 1e7) return res.status(400).json({ ok: false, erro: 'Valor inválido' });
+      if (v === 0) await redis('HDEL', 'met:anuncios', dia); else await redis('HSET', 'met:anuncios', dia, String(v));
+      return res.json({ ok: true });
+    }
     if (acao === 'metricas') {
       // Junta compradores (codigos) e uso (usos) sem expor e-mails: só datas e contagens por pessoa.
-      const [cods, usos, deps, nLista, nPush, compras, reemb, charg, valor] = await Promise.all([
+      const [cods, usos, deps, nLista, nPush, compras, reemb, charg, valorDia, anuncios] = await Promise.all([
         redis('HGETALL', 'codigos'), redis('HGETALL', 'usos'), redis('HGETALL', 'depoimentos'), redis('HLEN', 'lista'),
-        redis('HLEN', 'push'), redis('HGETALL', 'met:compra'), redis('HGETALL', 'met:reembolso'), redis('HGETALL', 'met:chargeback'), redis('HGETALL', 'met:valor')]);
+        redis('HLEN', 'push'), redis('HGETALL', 'met:compra'), redis('HGETALL', 'met:reembolso'), redis('HGETALL', 'met:chargeback'), redis('HGETALL', 'met:valor'), redis('HGETALL', 'met:anuncios')]);
       const par = (a) => { const o = {}; for (let i = 0; i < (a || []).length; i += 2) o[a[i]] = a[i + 1]; return o; };
       const U = par(usos), pessoas = [];
       for (const [conta, bruto] of Object.entries(par(cods))) {
@@ -71,7 +79,7 @@ module.exports = async (req, res) => {
       let nuvem = 0, cursor = '0';
       do { const r = await redis('SCAN', cursor, 'MATCH', 'nuvem:*', 'COUNT', '1000'); cursor = String(r[0]); nuvem += r[1].length; } while (cursor !== '0');
       const notas = Object.values(par(deps)).map((d) => { try { return JSON.parse(d).nota; } catch (e) { return 0; } }).filter(Boolean);
-      return res.json({ ok: true, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valor) },
+      return res.json({ ok: true, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valorDia) }, anuncios: par(anuncios),
         totais: { lista: nLista, push: nPush, nuvem, depoimentos: notas.length, notaMedia: notas.length ? notas.reduce((a, b) => a + b, 0) / notas.length : null } });
     }
     if (acao === 'lista') {
