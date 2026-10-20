@@ -875,13 +875,9 @@ function heroResumo(C){
     <div class="h2-lbl"><span>Pode gastar hoje</span>${st ? `<span class="st ${st[0]}">${st[1]}</span>` : ''}</div>
     <div class="big num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</div>
     <div class="h2-sub num">${C.entradas <= 0 ? 'Cadastre o que entra no mês (salário, renda) e o Tino calcula para você.' : livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>
-    ${base > 0 ? `<div class="ritmo" role="img" aria-label="Gastos do dia a dia ${Math.round(usado)}% do disponível, mês ${Math.round(passou)}% concluído">
-      <div class="ritmo-t"><span class="ritmo-f ${st?st[0]:''}" style="width:${usado}%"></span><span class="ritmo-m" style="left:${passou}%"></span></div>
-      <div class="ritmo-l"><span>Gastos do dia a dia <b>${Math.round(usado)}%</b></span><span>Mês <b>${Math.round(passou)}%</b></span></div></div>` : ''}
-    <div class="rapidas">
+    <div class="rapidas duas">
       <button data-act="possoComprar"><span>🤔</span>Posso comprar?</button>
       <button data-act="colar"><span>📋</span>Colar do banco</button>
-      <button data-act="semana"><span>📅</span>Minha semana</button>
     </div>
     <details class="como"><summary>Como chegamos nesse número</summary>
       <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas = <b>${brl(C.restante)}</b></div>
@@ -2284,13 +2280,12 @@ function render(){
   aplicarRecorrentes(cur.y,cur.m);
   const p = S.perfil;
   const saud = p.pronome==='Femininos' ? 'Bem-vinda' : p.pronome==='Masculinos' ? 'Bem-vindo' : 'Boas-vindas';
-  const frase = CONFIG.frases[hoje.getDate() % CONFIG.frases.length];
-  const telas = { resumo:telaResumo, lanc:telaLanc, contas:telaContas, metas:telaMetas, ajustes:telaAjustes };
+  const telas = { resumo:telaResumo, analise:telaAnalise, lanc:telaLanc, contas:telaContas, metas:telaMetas, ajustes:telaAjustes };
   $app.innerHTML = `
     <header class="top ${aba==='resumo'?'hero-top':''}">
       <button class="olho" data-act="olho" aria-label="${S.ocultar?'Mostrar valores':'Esconder valores'}" aria-pressed="${!!S.ocultar}">${S.ocultar ? ICON.olhoFechado : ICON.olho}</button>
       <div class="hello">Olá, ${esc(p.nome||'você')}!${sequenciaAtual()>=1?`<button class="streak" data-tab="metas" aria-label="Sequência de ${sequenciaAtual()} dias">🔥 ${sequenciaAtual()}</button>`:''}</div>
-      <div class="sub">${aba==='resumo' ? esc(frase) : saud + ' de volta'}</div>
+      ${aba==='resumo' || aba==='analise' ? '' : `<div class="sub">${saud} de volta</div>`}
       <div class="monthbar">
         <button data-act="prev" aria-label="Mês anterior">‹</button>
         <div class="m">${MESES[cur.m]} ${cur.y}</div>
@@ -2299,12 +2294,12 @@ function render(){
     </header>
     <main>${telas[aba]()}</main>
     <nav>
-      ${navBtn('resumo','Resumo')}${navBtn('lanc','Lançamentos')}
+      ${navBtn('resumo','Início')}${navBtn('lanc','Lançamentos')}
       <button class="fab" data-act="add" aria-label="Novo lançamento">${ICON.plus}</button>
       ${navBtn('contas','Contas')}${navBtn('metas','Planejar')}
     </nav>`;
 }
-const navBtn = (id,l) => `<button class="${aba===id?'on':''}" data-tab="${id}">${ICON[id]}${l}</button>`;
+const navBtn = (id,l) => `<button class="${aba===id || (id==='resumo' && aba==='analise')?'on':''}" data-tab="${id}">${ICON[id]}${l}</button>`;
 
 function variacao(atual, anterior, menorMelhor){
   if (anterior==null) return '<div class="d">Primeiro mês</div>';
@@ -2314,22 +2309,44 @@ function variacao(atual, anterior, menorMelhor){
   return `<div class="d"><span class="${bom?'up':'down'}">${dif>0?'▲':'▼'} ${brl(Math.abs(dif))}</span> vs. anterior</div>`;
 }
 
+// Tela inicial: só o essencial. Quanto dá para gastar hoje, um aviso por vez, o mês em três números e os
+// últimos lançamentos. Gráficos, fluxo, orçamentos, assinaturas e cofrinhos ficam na Análise do mês.
 function telaResumo(){
+  const C = calc(cur.y,cur.m);
+  const avisos = [cardPassos, alertasContas, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
+    cardRetro, cardTagAtiva, cardIndique, dicaTransferir, () => !S.listaDispensada && !precisaBackup() ? cardConectado() : ''];
+  let aviso = '';
+  for (const f of avisos){ aviso = f(); if (aviso) break; }
+  return heroResumo(C) + aviso + cardEsteMes(C) + cardUltimos();
+}
+function cardEsteMes(C){
+  const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,3), max = cats.length ? cats[0][1] : 1;
+  return `<section class="card mes-resumo">
+    <div class="mr-nums">
+      <div><span>Entrou</span><b class="num">${brl0(C.entradas)}</b></div>
+      <div><span>Saiu</span><b class="num">${brl0(C.saidas + C.reservas)}</b></div>
+      <div><span>Sobrou</span><b class="num ${C.restante<0 && !S.ocultar?'neg':''}">${brl0(C.restante)}</b></div>
+    </div>
+    ${cats.length ? `<div class="hbars mr-cats">${cats.map(([c,v])=>`<button class="hb" data-cat="${esc(c)}" aria-label="${esc(nomeCat(c))}: ${brl(v)}">
+      <span class="hb-l"><span class="hb-e">${emojiCat(c)}</span>${esc(nomeCat(c))}</span><span class="hb-v num">${brl(v)}</span>
+      <span class="hb-t"><span style="width:${Math.max(v/max*100,1.5)}%"></span></span></button>`).join('')}</div>` : ''}
+    <button class="ver-mais" data-act="analise">Ver análise completa ›</button></section>`;
+}
+function cardUltimos(){
+  const M = mes(cur.y,cur.m), mk = key(cur.y,cur.m);
+  const it = [...M.gastos.map(g => ({ tipo:'gastos', id:g.id, ic:emojiCat(g.cat), t:g.desc || nomeCat(g.cat), d:g.data, v:-(+g.valor) })),
+    ...M.entradas.map(e => ({ tipo:'entradas', id:e.id, ic:'💰', t:e.nome || 'Entrada', d:e.data, v:+e.valor }))]
+    .sort((a,b) => String(b.d||'').localeCompare(String(a.d||''))).slice(0,3);
+  if (!it.length) return '';
+  return `<section class="card"><h3>Últimos lançamentos</h3>
+    <div class="list">${it.map(i => `<button class="item" data-edit="${i.tipo}" data-id="${i.id}" data-mk="${mk}"><div class="ic">${i.ic}</div><div class="tx"><div class="t1">${esc(i.t)}</div><div class="t2">${i.d ? fmtData(i.d) : ''}</div></div><div class="val num ${i.v>0?'up':''}">${brl(Math.abs(i.v))}</div></button>`).join('')}</div>
+    <button class="ver-mais" data-tab="lanc">Ver todos</button></section>`;
+}
+function telaAnalise(){
   const C = calc(cur.y,cur.m), P = C.P;
   const prox = nextYM(cur.y,cur.m);
   const neg = C.restante < 0;
-  revisarModoSimples();
-  const simples = !!S.modoSimples;
-  let html = heroResumo(C) + cardPassos() + (simples ? '' : cardModoCompleto()) + cardSemana() + cardOrganizar() + cardRendaVariavel(C);
-
-  html += cardTagAtiva();
-  html += cardRetro();
-  html += cardIndique();
-  html += dicaTransferir();
-  html += lembreteBackup();
-  if (!S.listaDispensada && !precisaBackup() && !S.modoSimples) html += cardConectado();
-  html += alertasContas();
-  html += alertasOrcamento(C);
+  let html = `<button class="voltar-inicio" data-tab="resumo">‹ Início</button><h2 class="tela-tit">Análise do mês</h2>`;
 
   const grade = `<div class="grid">
     ${stat('Entradas','#0d9668',C.entradas, variacao(C.entradas, P&&P.entradas, false))}
@@ -2343,7 +2360,6 @@ function telaResumo(){
 
   html += cardDicas();
   html += cardCategorias(C);
-  if (simples) return html + cardModoCompleto();   // modo simples: só o essencial
   html += cardFluxo(C);
   html += grade;
   html += cardOrcamentos(C);
@@ -3087,8 +3103,6 @@ function telaAjustes(){
     <p class="note" style="margin:0 0 12px">Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira quando ele comprar.</p>
     <button class="btn pri" data-act="indique">Ver meu convite</button>
     ${S.conta && !S.indicadoInformado ? '<button class="link-sutil" data-act="indiqueUsar">Alguém te indicou? Digite o código</button>' : ''}</section>` : ''}
-  <section class="card"><h3>Tela inicial</h3>
-    <div class="switch"><span>Modo simples <small class="muted">(só o essencial na tela inicial)</small></span><button class="tg ${S.modoSimples?'on':''}" data-act="modoSimplesTg" aria-label="Modo simples"></button></div></section>
   <section class="card"><h3>Categorias</h3>
     <p class="note" style="margin:0 0 12px">Crie categorias do seu jeito (pet, filhos, academia…) e esconda as que você não usa.${(S.catsExtras||[]).length ? ` Você tem <b>${S.catsExtras.length}</b> categoria${S.catsExtras.length>1?'s':''} sua${S.catsExtras.length>1?'s':''}.` : ''}</p>
     <button class="btn sec" data-act="categorias">🏷️ Minhas categorias</button></section>
@@ -3385,6 +3399,7 @@ document.addEventListener('click', e=>{
   if (a==='colarLancar'){ lancarTexto(document.getElementById('cTexto').value); return; }
   if (a==='colarLer'){ navigator.clipboard.readText().then(x => { document.getElementById('cTexto').value = x; if (interpretarTextoBanco(x)) lancarTexto(x); else toast('Não encontrei um valor (R$) no que você copiou'); }).catch(() => toast('Não consegui ler. Toque no campo e use Colar.')); return; }
   if (a==='semana'){ abrirSemana(); return; }
+  if (a==='analise'){ aba = 'analise'; render(); scrollTo(0,0); return; }
   if (a==='catsToggle'){ catsAbertas = !catsAbertas; render(); return; }
   if (a==='ajuda'){ abrirAjuda(); return; }
   if (a==='listaAbrir'){ abrirLista(); return; }
