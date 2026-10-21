@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 55;
+const APP_VERSAO = 56;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -523,24 +523,30 @@ function cardCartoes(){
 function abrirFatura(cid){
   const c = cartaoPorId(cid), f = faturasPorCartao(cur.y,cur.m).find(x => x.cartao && x.cartao.id === cid); if (!c || !f) return;
   const st = statusFatura(cid, cur.y, cur.m), parcial = st && st.pago < f.valor - 0.004;
+  // Data sugerida: hoje, ou o vencimento se ele já passou (quem marca atrasado normalmente pagou no vencimento)
+  const venc = vencFatura(c, cur.y, cur.m), sugerida = dataHoje() > venc ? venc : dataHoje();
+  const campoData = (v) => `<div class="f"><label>Data do pagamento</label><input type="date" id="fatData" value="${v}"></div>`;
   abrir(`<h2>💳 Fatura ${esc(c.nome)}</h2>
     <p class="sim-txt">${MESES[cur.m]} · vence dia ${c.vencimento} · <b>${brl(f.valor)}</b></p>
     ${st ? `<p class="gprev ok">${parcial ? `Você pagou <b>${brl(st.pago)}</b>. O restante (${brl(f.valor - st.pago)}) virou uma dívida de rotativo em Planejar → Dívidas.` : `✓ Fatura paga${st.em ? ' em ' + fmtData(st.em) : ''}.`}</p>
+      ${campoData(st.em || sugerida)}
+      <button class="btn sec" data-act="fatSalvarData" data-c="${cid}">Salvar data</button>
       <button class="btn sec" data-act="fatDesfazer" data-c="${cid}">Desfazer</button>`
-    : `<button class="btn pri" data-act="fatPagar" data-c="${cid}">✓ Marquei como paga</button>
+    : `${campoData(sugerida)}
+      <button class="btn pri" data-act="fatPagar" data-c="${cid}">✓ Marcar como paga</button>
       <button class="btn sec" data-act="fatParcialAbrir">Paguei só uma parte</button>
       <div id="boxFatParcial" hidden style="margin-top:12px">
         <div class="f"><label>Quanto você pagou?</label><input class="money num" id="fatPago" inputmode="decimal" placeholder="0,00"></div>
         <p class="note" style="margin:-4px 0 12px">O que faltar vira uma dívida de <b>rotativo do cartão</b> em Planejar → Dívidas. O rotativo costuma ter juros muito altos: tente quitar o quanto antes ou parcelar a fatura com o banco.</p>
         <button class="btn pri" data-act="fatParcial" data-c="${cid}">Registrar pagamento parcial</button></div>`}`);
 }
-function pagarFatura(cid, valorPago){
+function pagarFatura(cid, valorPago, data){
   const c = cartaoPorId(cid), f = faturasPorCartao(cur.y,cur.m).find(x => x.cartao && x.cartao.id === cid); if (!c || !f) return;
   S.faturasPagas = S.faturasPagas || {};
-  const reg = { pago: Math.min(valorPago ?? f.valor, f.valor), em: dataHoje() }, resto = Math.round((f.valor - reg.pago) * 100) / 100;
+  const reg = { pago: Math.min(valorPago ?? f.valor, f.valor), em: data || dataHoje() }, resto = Math.round((f.valor - reg.pago) * 100) / 100;
   if (resto > 0.004){
     const d = { id:uid(), nome:`Saldo da fatura ${c.nome} (${MES_CURTO[cur.m]}/${String(cur.y).slice(2)})`, tipo:'rotativo', saldo:resto, juros:0, parcela:0,
-      venc:c.vencimento, inicial:resto, criada:dataHoje(), pagamentos:[], fatura:fatKey(cid, cur.y, cur.m) };
+      venc:c.vencimento, inicial:resto, criada:reg.em, pagamentos:[], fatura:fatKey(cid, cur.y, cur.m) };
     S.dividas = S.dividas || []; S.dividas.push(d); reg.divida = d.id;
   }
   S.faturasPagas[fatKey(cid, cur.y, cur.m)] = reg; salvar(); render();
@@ -3473,10 +3479,12 @@ document.addEventListener('click', e=>{
   else if (a==='excluirReceber'){ const r = (S.aReceber||[]).find(x => x.id === t.dataset.id); if (!r || !confirm(`Excluir "${r.desc}" (${brl(r.valor)}) de ${r.pessoa}?`)) return;
     S.aReceber = S.aReceber.filter(x => x.id !== r.id); salvar(); render(); abrirPessoa(r.pessoa); toast('Excluído'); }
   else if (a==='fatAbrir'){ abrirFatura(t.dataset.c); }
-  else if (a==='fatCheck'){ if (statusFatura(t.dataset.c, cur.y, cur.m)) abrirFatura(t.dataset.c); else pagarFatura(t.dataset.c); }
-  else if (a==='fatPagar'){ pagarFatura(t.dataset.c); }
+  else if (a==='fatCheck'){ abrirFatura(t.dataset.c); }
+  else if (a==='fatPagar'){ pagarFatura(t.dataset.c, undefined, (document.getElementById('fatData')||{}).value); }
+  else if (a==='fatSalvarData'){ const d = (document.getElementById('fatData')||{}).value, reg = statusFatura(t.dataset.c, cur.y, cur.m);
+    if (reg && d){ reg.em = d; salvar(); render(); fechar(); toast('Data do pagamento salva ✓'); } }
   else if (a==='fatParcialAbrir'){ document.getElementById('boxFatParcial').hidden = false; t.hidden = true; document.getElementById('fatPago').focus(); }
-  else if (a==='fatParcial'){ const v = parseValor(document.getElementById('fatPago').value); if (!(v > 0)) return toast('Digite quanto você pagou'); pagarFatura(t.dataset.c, v); }
+  else if (a==='fatParcial'){ const v = parseValor(document.getElementById('fatPago').value); if (!(v > 0)) return toast('Digite quanto você pagou'); pagarFatura(t.dataset.c, v, (document.getElementById('fatData')||{}).value); }
   else if (a==='fatDesfazer'){ desfazerFatura(t.dataset.c); }
   else if (a==='cobrar'){ cobrar(t.dataset.pessoaNome); }
   else if (a==='tgLancarRec'){ S.lancarRecebidos = S.lancarRecebidos === false; salvar(); t.classList.toggle('on', S.lancarRecebidos !== false); }
