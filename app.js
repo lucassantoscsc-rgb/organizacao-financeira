@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 58;
+const APP_VERSAO = 59;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -3089,12 +3089,14 @@ function abrirForm(tipo, id, mk, opcoes){
   const del = it ? `<button class="btn dan" data-act="excluir">Excluir</button>` : '';
   const topo = it ? '' : abasForm(tipo);
   if (tipo==='entradas'){
-    form.v = { fixa: it?!!it.fixa:false };
+    form.v = { fixa: it?!!it.fixa:false, tipoEnt: it && it.fixa ? 'Fixo (todo mês)' : 'Único' };
     abrir(`${topo}<h2>${it?'Editar':'Nova'} entrada</h2>
-      <div class="f"><label>Valor</label><input class="money num" id="fValor" inputmode="decimal" placeholder="0,00" value="${moneyVal(it&&it.valor)}"></div>
+      <div class="f"><label id="lblEntValor">Valor</label><input class="money num" id="fValor" inputmode="decimal" placeholder="0,00" value="${moneyVal(it&&it.valor)}"></div>
       <div class="f"><label>Nome</label><input id="fNome" placeholder="Ex.: Salário, Freela, Vendas" value="${esc(it?it.nome:'')}"></div>
       <div class="f"><label>Data</label><input type="date" id="fData" value="${it?it.data||'':dataPadrao()}"></div>
-      <div class="switch f"><span>Repete todo mês <small class="muted">(ex.: salário)</small></span><button type="button" class="tg ${form.v.fixa?'on':''}" data-act="tgFixa"></button></div>
+      ${it && it.parcela ? `<p class="note" style="margin:-4px 0 12px">Parcela ${it.parcela} de ${it.de} de um recebimento parcelado. As mudanças valem só para esta parcela.</p>`
+        : `<div class="f"><label>Como você recebe</label>${chips('tipoEnt', it ? ['Único','Fixo (todo mês)'] : ['Único','Parcelado','Fixo (todo mês)'], form.v.tipoEnt)}</div>
+      <div class="f" id="boxEntParc" hidden><label>Quantas parcelas?</label><select id="fEntParc">${Array.from({length:23},(_,i)=>i+2).map(n=>`<option value="${n}" ${n===3?'selected':''}>${n}x</option>`).join('')}</select><div class="note" id="entParcInfo"></div></div>`}
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
   if (tipo==='gastos'){
@@ -3152,6 +3154,17 @@ function abrirForm(tipo, id, mk, opcoes){
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
 }
+// Entrada parcelada: mostra o total e quando cai cada parcela (uma por mês, no mesmo dia).
+function datasParcelasEntrada(base, n){
+  const y = +base.slice(0,4), m = +base.slice(5,7) - 1, d = +base.slice(8,10);
+  return Array.from({ length:n }, (_, i) => { const o = somaMeses(y, m, i); return key(o.y,o.m) + '-' + String(Math.min(d, diasNoMes(o.y,o.m))).padStart(2,'0'); });
+}
+function infoEntParc(){
+  const el = document.getElementById('entParcInfo'); if (!el || !form) return;
+  const n = +(document.getElementById('fEntParc')||{}).value || 2, v = parseValor((document.getElementById('fValor')||{}).value), base = (document.getElementById('fData')||{}).value || dataPadrao();
+  const ds = datasParcelasEntrada(base, n);
+  el.innerHTML = v ? `${n}x de ${brl(v)} = <b>${brl(v*n)}</b> · uma por mês: ${ds.slice(0,4).map(fmtData).join(', ')}${n>4?'…':''}` : 'Digite o valor de cada parcela.';
+}
 function infoParcelas(){
   const el = document.getElementById('parcInfo'); if (!el || !form) return;
   const n = +(document.getElementById('fParc')||{}).value || 1, v = parseValor((document.getElementById('fValor')||{}).value);
@@ -3190,6 +3203,14 @@ function salvarForm(){
   let obj;
   if (tipo==='entradas'){
     const valor=parseValor(g('fValor')); if(!valor) return toast('Informe o valor');
+    if (!id && v.tipoEnt === 'Parcelado'){
+      const n = Math.max(2, +g('fEntParc') || 2), nome = g('fNome') || 'Entrada', grupo = uid();
+      datasParcelasEntrada(g('fData') || dataPadrao(), n).forEach((d, i) => {
+        const o = ymDe(d.slice(0,7)); mes(o.y, o.m, true).entradas.push({ id:uid(), nome:`${nome} (${i+1}/${n})`, valor, data:d, fixa:false, grupo, parcela:i+1, de:n });
+      });
+      S.novosDesdeBackup = (S.novosDesdeBackup||0) + n; registrarDiaAtivo(); salvar(); fechar();
+      aba = 'lanc'; subLanc = 'entradas'; render(); toast(`${n} parcelas de ${brl(valor)} lançadas ✓`); checarConquistas(); return;
+    }
     obj = { nome:g('fNome')||'Entrada', valor, data:g('fData'), fixa:v.fixa };
   }
   if (tipo==='gastos'){
@@ -3285,6 +3306,8 @@ document.addEventListener('click', e=>{
     form.v[name] = name==='essencial' ? t.dataset.v==='Sim' : name==='cartao' ? ((S.cartoes||[]).find(c=>c.nome===t.dataset.v)||{}).id : t.dataset.v;
     if (name==='cartao') infoParcelas();
     if (name==='tipoDiv'){ form.v.tipo = t.dataset.v; return; }
+    if (name==='tipoEnt'){ form.v.fixa = t.dataset.v.startsWith('Fixo'); const b = document.getElementById('boxEntParc'); if (b) b.hidden = t.dataset.v !== 'Parcelado';
+      const l = document.getElementById('lblEntValor'); if (l) l.textContent = t.dataset.v === 'Parcelado' ? 'Valor de cada parcela' : 'Valor'; infoEntParc(); return; }
     if (name==='jurosAno'){ form.v.jurosAno = t.dataset.v==='ano'; return; }
     if (name==='metodo'){ form.v.metodo = t.dataset.v; desenharPlano(); return; }
     if (name==='pag'){ form.v.credito = t.dataset.v==='credito'; document.getElementById('sBoxParc').hidden = !form.v.credito; atualizarSimulacao(); return; }
@@ -3704,6 +3727,7 @@ document.addEventListener('input', e=>{
 document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
+  if (e.target.id==='fValor' || e.target.id==='fEntParc' || e.target.id==='fData') infoEntParc();
   if (e.target.dataset.parte && form && form.v.partes){ form.v.partes[+e.target.dataset.parte].valor = parseValor(e.target.value); infoPartes(); }
   if (e.target.id==='fValor' && form && form.v.partes) infoPartes();
   if (e.target.id==='sValor') atualizarSimulacao();
