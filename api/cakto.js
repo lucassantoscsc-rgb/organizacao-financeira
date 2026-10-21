@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 const { redis, normalizar } = require('./_db');
 const indique = require('./indique');
+const emails = require('./_emails');
 
 function secretOk(recebido) {
   const certo = Buffer.from(process.env.CAKTO_SECRET || '');
@@ -47,6 +48,8 @@ module.exports = async (req, res) => {
         const m = JSON.stringify(dados).match(/indica-([A-Z0-9]{4,12})/i);
         if (m) await indique.creditar(m[1].toUpperCase(), email, 'checkout');
       } catch (e) { /* indicação é secundária */ }
+      // E-mail de boas-vindas: acesso liberado + como entrar e instalar
+      try { await emails.enviarEtapa(email, 'd0', 'd0', emails.primeiroNome(cliente.name)); } catch (e) { /* e-mail é secundário */ }
     } else if (corpo.event === 'refund' || corpo.event === 'chargeback') {
       await redis('HDEL', 'codigos', email);
       await redis('HDEL', 'usos', email);

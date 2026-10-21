@@ -207,6 +207,7 @@ function desenharMetricas(){
       ${k('Backup na nuvem', T.nuvem, pct(T.nuvem, ativaram.length) + ' de quem ativou')}
       ${k('Lista de espera', T.lista, 'Tino Conectado')}
     </div>
+    ${blocoEmails(met.emails)}
     ${blocoIndique(met.indique, vTot)}
     ${blocoNps(N, prom, detr)}
     ${blocoErros(met.erros || [])}
@@ -215,6 +216,24 @@ function desenharMetricas(){
 document.addEventListener('input', e => { if (e.target.id === 'preco' || e.target.id === 'taxa') desenharMetricas(); });
 try { const p = localStorage.getItem('admPreco'), tx = localStorage.getItem('admTaxa'); setTimeout(() => { if (p) document.getElementById('preco').value = p; if (tx) document.getElementById('taxa').value = tx; }, 0); } catch(e){}
 
+/* E-mails automáticos para quem compra o app: quantos saíram de cada tipo e envio de teste. */
+const NOMES_EMAIL = { d0:'Acesso liberado (na compra)', d1_entrar:'1 dia: ainda não entrou', d1_lancar:'1 dia: primeiro lançamento', d3:'3 dias: Colar do banco', d7:'7 dias: 3 recursos' };
+function blocoEmails(E){
+  if (!E) return '';
+  const k = (rot, val, sub) => `<div class="kpi"><span>${rot}</span><b>${val}</b>${sub?`<small>${sub}</small>`:''}</div>`;
+  return `<div class="secao">📧 E-mails automáticos</div>
+    <div class="kpis">${Object.entries(NOMES_EMAIL).map(([m, rot]) => k(rot, +(E.enviados||{})[m] || 0, 'enviados')).join('')}${k('Pediram para sair', E.sairam, 'não recebem mais dicas')}</div>
+    <form class="ads-form" onsubmit="emailTeste(event)">
+      <div><label for="emTipo">Modelo</label><select id="emTipo">${Object.entries(NOMES_EMAIL).map(([m, rot]) => `<option value="${m}">${rot}</option>`).join('')}</select></div>
+      <div style="flex:1;min-width:200px"><label for="emPara">Enviar teste para</label><input id="emPara" type="email" placeholder="seu@email.com" style="width:100%"></div>
+      <button type="submit">Enviar teste</button>
+    </form>`;
+}
+async function emailTeste(e){
+  e.preventDefault();
+  await api({ acao:'emailTeste', para:document.getElementById('emPara').value, modelo:document.getElementById('emTipo').value });
+  alert('E-mail de teste enviado ✓ Confira a caixa de entrada (e o spam).');
+}
 /* Indique e ganhe: configuração (cupom e link da planilha) e quem já indicou. */
 function blocoIndique(I, vTot){
   if (!I) return '';

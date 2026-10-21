@@ -52,6 +52,14 @@ module.exports = async (req, res) => {
       lista.sort((a, b) => b.em.localeCompare(a.em));
       return res.json({ ok: true, lista });
     }
+    if (acao === 'emailTeste') {
+      // Manda um dos e-mails automáticos para o endereço digitado (para conferir como chega).
+      const { MODELOS, enviarEmail } = require('./_emails');
+      const para = String(req.body.para || '').trim().toLowerCase(), modelo = String(req.body.modelo || '');
+      if (!/^\S+@\S+\.\S+$/.test(para) || !MODELOS[modelo]) return res.status(400).json({ ok: false, erro: 'Confira o e-mail e o modelo' });
+      await enviarEmail(para, modelo, 'Teste');
+      return res.json({ ok: true });
+    }
     if (acao === 'indiqueConfig') {
       // Cupom do amigo indicado e link de entrega da planilha (brinde de quem indica).
       const { cupom, planilha } = req.body;
@@ -104,7 +112,8 @@ module.exports = async (req, res) => {
       const cfg = par(await redis('HGETALL', 'config'));
       const indicacoes = Object.entries(par(await redis('HGETALL', 'ind:quem'))).map(([amigo, v]) => { try { return { amigo, ...JSON.parse(v) }; } catch (e) { return null; } }).filter(Boolean);
       const indique = { cupom: cfg.cupom || 'AMIGOTINO', planilha: cfg.planilha || '', codigos: +(await redis('HLEN', 'ind:cod')) || 0, indicacoes };
-      return res.json({ ok: true, indique, erros, nps, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valorDia) }, anuncios: par(anuncios),
+      const emailsEnviados = par(await redis('HGETALL', 'emails:contagem')), emailsSairam = +(await redis('HLEN', 'emails:sair')) || 0;
+      return res.json({ ok: true, emails: { enviados: emailsEnviados, sairam: emailsSairam }, indique, erros, nps, pessoas, eventos: { compra: par(compras), reembolso: par(reemb), chargeback: par(charg), valor: par(valorDia) }, anuncios: par(anuncios),
         totais: { lista: nLista, push: nPush, nuvem, depoimentos: notas.length, notaMedia: notas.length ? notas.reduce((a, b) => a + b, 0) / notas.length : null } });
     }
     if (acao === 'lista') {
