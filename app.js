@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 54;
+const APP_VERSAO = 55;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -97,6 +97,18 @@ function migrar(){
   // Quem já usava antes do lembrete de backup: conta os lançamentos existentes como "sem backup".
   if (S.novosDesdeBackup == null) S.novosDesdeBackup = S.ultimoBackup ? 0 :
     Object.values(S.meses).reduce((a,M)=>a+M.entradas.length+M.gastos.length+M.contas.length+M.reservas.length, 0);
+  // Antes, um gasto ficava no mês aberto na tela, mesmo com a data de outro mês. Compras parceladas lançadas
+  // depois (ex.: compra de agosto lançada em outubro) contavam a 1ª parcela no mês errado: vão para o mês da compra.
+  if (!S.migParcData){
+    Object.keys(S.meses).forEach(k => {
+      const M = S.meses[k];
+      M.gastos.filter(g => (+g.parcelas||1) > 1 && /^\d{4}-\d{2}-\d{2}$/.test(g.data||'') && g.data.slice(0,7) < k).forEach(g => {
+        M.gastos.splice(M.gastos.indexOf(g), 1);
+        const d = g.data.slice(0,7); S.meses[d] = S.meses[d] || { entradas:[], gastos:[], contas:[], reservas:[] }; S.meses[d].gastos.push(g);
+      });
+    });
+    S.migParcData = true;
+  }
 }
 migrar();
 // Tema: 'auto' segue o celular; 'claro' e 'escuro' forçam.
@@ -3178,15 +3190,21 @@ function salvarForm(){
     const ehCof = v.dest.startsWith('cof:');
     obj = { tipo: ehCof ? 'Cofrinho' : v.dest, cof: ehCof ? v.dest.slice(4) : undefined, nome:g('fNome'), valor, data:g('fData') };
   }
-  if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
-  else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo();
-    if (tipo==='gastos' && obj.dividido) criarDivisao(M.gastos[M.gastos.length-1], mk || key(cur.y,cur.m));
-    if (form.extras) M.gastos.push(...form.extras); }
+  // Gastos, entradas e reservas ficam no mês da data informada (uma compra de agosto lançada em outubro vai para agosto,
+  // e as parcelas contam a partir de lá). Contas pertencem ao mês da tela.
+  const origK = mk || key(cur.y,cur.m), destK = tipo !== 'contas' && /^\d{4}-\d{2}-\d{2}$/.test(obj.data||'') ? obj.data.slice(0,7) : origK;
+  const Md = destK === origK ? M : mes(ymDe(destK).y, ymDe(destK).m, true);
+  if (id){ const i=M[tipo].findIndex(x=>x.id===id), novo = {...M[tipo][i], ...obj};
+    if (Md !== M){ M[tipo].splice(i, 1); Md[tipo].push(novo); } else M[tipo][i] = novo; }
+  else { Md[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo();
+    if (tipo==='gastos' && obj.dividido) criarDivisao(Md.gastos[Md.gastos.length-1], destK);
+    if (form.extras) Md.gastos.push(...form.extras); }
+  const outroMes = destK !== key(cur.y,cur.m) ? MESES[ymDe(destK).m].toLowerCase() + (ymDe(destK).y !== cur.y ? ' de ' + ymDe(destK).y : '') : '';
   const nPartes = form.extras ? form.extras.length + 1 : 0;
   salvar(); fechar();
   if (aba==='lanc' && subLanc==='calendario') {} else if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
-  toast(nPartes ? `Salvo em ${nPartes} categorias ✓` : tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
+  toast(outroMes ? `Salvo em ${outroMes} ✓` : nPartes ? `Salvo em ${nPartes} categorias ✓` : tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
   checarConquistas();
 }
 // Mensagem depois de lançar um gasto numa categoria com orçamento.
