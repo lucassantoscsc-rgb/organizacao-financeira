@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 51;
+const APP_VERSAO = 52;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2982,7 +2982,10 @@ function abrirForm(tipo, id, mk, opcoes){
     abrir(`${topo}${it?'':blocoFrase()}<h2>${it?'Editar':'Novo'} gasto</h2>
       <div class="f"><input class="money num big" id="fValor" inputmode="decimal" placeholder="R$ 0,00" aria-label="Valor" value="${moneyVal(it&&it.valor)}"></div>
       ${rec.length?`<div class="f"><label>Usados com frequência</label><div class="chips rec">${rec.map((g,i)=>`<button type="button" data-rec="${i}">${emojiCat(g.cat)} ${esc(g.desc||nomeCat(g.cat))}</button>`).join('')}</div></div>`:''}
-      <div class="f"><label>Categoria</label><div class="catgrid">${catsVisiveis(form.v.cat).map(c=>`<button type="button" class="${c===form.v.cat?'on':''}" data-catsel="${esc(c)}"><span>${emojiCat(c)}</span>${esc(nomeCat(c))}</button>`).join('')}</div></div>
+      <div class="f"><label>Categoria</label><div class="catgrid">${catsVisiveis(form.v.cat).map(c=>`<button type="button" class="${c===form.v.cat?'on':''}" data-catsel="${esc(c)}"><span>${emojiCat(c)}</span>${esc(nomeCat(c))}</button>`).join('')}</div>
+        ${it ? '' : `<button type="button" class="dividir-cat" data-act="divCats" id="btnDivCats">➗ Dividir entre categorias</button>
+        <div id="boxDivCats" class="div-cats" hidden><div id="divCatsLista"></div>
+          <button type="button" class="btn sec mini" data-act="divCatsMais">+ Outra categoria</button><div class="note" id="divCatsInfo"></div></div>`}</div>
       <div class="f"><label>Forma de pagamento</label>${chips('forma',FORMAS,form.v.forma)}</div>
       <div class="f" id="boxCartao" ${form.v.forma==='Crédito' && (S.cartoes||[]).length?'':'hidden'}><label>Cartão</label>${chips('cartao', (S.cartoes||[]).map(c=>c.nome), (cartaoPorId(form.v.cartao)||{}).nome)}</div>
       <div class="f" id="boxParc" ${form.v.forma==='Crédito'?'':'hidden'}><label>Parcelas</label><select id="fParc">${Array.from({length:24},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===form.v.parcelas?'selected':''}>${n===1?'À vista (1x)':n+'x'}</option>`).join('')}</select><div class="note" id="parcInfo"></div></div>
@@ -3034,8 +3037,26 @@ function infoParcelas(){
   const quando = c ? `na fatura que vence em ${fmtData(vencFatura(c, pg.y, pg.m))}` : `na fatura de ${MESES[pg.m]}`;
   el.textContent = form.v.forma!=='Crédito' ? '' : n>1 && v ? `${n}x de ${brl(v/n)} · a primeira entra ${quando}` : `Entra ${quando}`;
 }
+// Dividir um gasto entre categorias (ex.: compra do mercado com comida, limpeza e pet). A categoria marcada é a
+// principal e fica com o que sobrar; as outras partes são digitadas. Ao salvar, vira um lançamento por categoria.
+function desenharPartes(){
+  const box = document.getElementById('divCatsLista'); if (!box || !form.v.partes) return;
+  const opcoes = (atual) => catsVisiveis(atual).filter(c => c !== form.v.cat).map(c => `<option value="${esc(c)}" ${c===atual?'selected':''}>${esc(c)}</option>`).join('');
+  box.innerHTML = `<div class="parte principal"><span>${form.v.cat ? esc(form.v.cat) : 'Escolha a categoria principal acima'}</span><b class="num" id="divCatsResto"></b></div>` +
+    form.v.partes.map((pt, i) => `<div class="parte"><select data-partecat="${i}"><option value="">Categoria…</option>${opcoes(pt.cat)}</select>
+      <input class="num" inputmode="decimal" placeholder="0,00" data-parte="${i}" value="${pt.valor ? moneyVal(pt.valor) : ''}"><button type="button" class="tirar" data-act="divCatsTirar" data-i="${i}" aria-label="Tirar esta parte">×</button></div>`).join('');
+  infoPartes();
+}
+function infoPartes(){
+  const info = document.getElementById('divCatsInfo'), resto = document.getElementById('divCatsResto'); if (!info || !form.v.partes) return;
+  const total = parseValor((document.getElementById('fValor')||{}).value), r = total - soma(form.v.partes, p => p.valor || 0);
+  if (resto) resto.textContent = total ? brl(Math.max(r, 0)) : '—';
+  info.innerHTML = !total ? 'Digite o valor total da compra lá em cima.' : r > 0.004 ? `✓ ${form.v.cat ? esc(nomeCat(form.v.cat)) : 'A categoria principal'} fica com <b>${brl(r)}</b>.`
+    : '<span style="color:var(--danger-ink)">⚠️ As partes passam do valor total.</span>';
+}
 function selecionarCat(c){
   form.v.cat = c;
+  if (form.v.partes){ form.v.partes.forEach(p => { if (p.cat === c) p.cat = ''; }); desenharPartes(); }
   $sh.querySelectorAll('[data-catsel]').forEach(b=>b.classList.toggle('on', b.dataset.catsel===c));
   if (!form.id){ form.v.essencial = ehEssencial(c);
     $sh.querySelectorAll('[data-chips="essencial"] button').forEach(b=>b.classList.toggle('on', b.dataset.v===(form.v.essencial?'Sim':'Não'))); }
@@ -3057,6 +3078,15 @@ function salvarForm(){
     if (cartao) S.ultimoCartao = cartao;
     const tags = tagsDe(g('fTags'));
     obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao, tags: tags.length ? tags : undefined };
+    if (!id && v.partes){
+      if (v.dividir) return toast('Divida entre categorias ou entre pessoas, uma coisa por vez');
+      const ps = v.partes.filter(p => p.valor > 0);
+      if (ps.some(p => !p.cat)) return toast('Escolha a categoria de cada parte');
+      const resto = Math.round((valor - soma(ps, p => p.valor)) * 100) / 100;
+      if (resto <= 0) return toast('As partes passam do valor total');
+      if (ps.length){ const grupo = uid(); obj.valor = resto; obj.grupo = grupo;
+        form.extras = ps.map(p => ({ ...obj, id:uid(), cat:p.cat, valor:p.valor, essencial:ehEssencial(p.cat), grupo })); }
+    }
     if (!id && v.dividir){ const ps = nomesDe(g('fPessoas')); if (!ps.length) return toast('Com quem você dividiu?');
       obj.dividido = ps; obj.minha = Math.round(valor / (ps.length+1) * 100) / 100; }
     if (id){ const ant = M.gastos.find(x=>x.id===id); if (ant && ant.dividido && ant.valor) obj.minha = Math.round(ant.minha / ant.valor * valor * 100) / 100; }
@@ -3077,11 +3107,13 @@ function salvarForm(){
   }
   if (id){ const i=M[tipo].findIndex(x=>x.id===id); M[tipo][i] = {...M[tipo][i], ...obj}; }
   else { M[tipo].push({ id:uid(), ...obj }); S.novosDesdeBackup = (S.novosDesdeBackup||0) + 1; registrarDiaAtivo();
-    if (tipo==='gastos' && obj.dividido) criarDivisao(M.gastos[M.gastos.length-1], mk || key(cur.y,cur.m)); }
+    if (tipo==='gastos' && obj.dividido) criarDivisao(M.gastos[M.gastos.length-1], mk || key(cur.y,cur.m));
+    if (form.extras) M.gastos.push(...form.extras); }
+  const nPartes = form.extras ? form.extras.length + 1 : 0;
   salvar(); fechar();
   if (aba==='lanc' && subLanc==='calendario') {} else if (tipo!=='contas'){ aba='lanc'; subLanc=tipo; } else aba='contas';
   render();
-  toast(tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
+  toast(nPartes ? `Salvo em ${nPartes} categorias ✓` : tipo==='gastos' ? avisoOrcamento(obj.cat) : 'Salvo ✓');
   checarConquistas();
 }
 // Mensagem depois de lançar um gasto numa categoria com orçamento.
@@ -3336,6 +3368,13 @@ document.addEventListener('click', e=>{
   else if (a==='novoAReceber'){ novoAReceber(); }
   else if (a==='salvarAReceber'){ salvarAReceber(); }
   else if (a==='tgEmprestei'){ form.v.emprestei = !form.v.emprestei; t.classList.toggle('on', form.v.emprestei); }
+  else if (a==='divCats'){
+    if (form.v.partes){ form.v.partes = null; document.getElementById('boxDivCats').hidden = true; t.textContent = '➗ Dividir entre categorias'; return; }
+    if (!form.v.cat) return toast('Escolha primeiro a categoria principal');
+    form.v.partes = [{ cat:'', valor:0 }]; document.getElementById('boxDivCats').hidden = false; t.textContent = 'Cancelar divisão'; desenharPartes();
+  }
+  else if (a==='divCatsMais'){ form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
+  else if (a==='divCatsTirar'){ form.v.partes.splice(+t.dataset.i, 1); if (!form.v.partes.length) form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
   else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
   else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
   else if (a==='cobrar'){ cobrar(t.dataset.pessoaNome); }
@@ -3522,6 +3561,8 @@ document.addEventListener('input', e=>{
 document.addEventListener('focusout', e=>{ if (e.target.id==='fFrase' && e.target.value.trim() && e.target.dataset.aplicado !== e.target.value){ e.target.dataset.aplicado = e.target.value; aplicarFrase(e.target.value); } });
 document.addEventListener('input', e=>{
   if (e.target.id==='fValor' || e.target.id==='fParc') infoParcelas();
+  if (e.target.dataset.parte && form && form.v.partes){ form.v.partes[+e.target.dataset.parte].valor = parseValor(e.target.value); infoPartes(); }
+  if (e.target.id==='fValor' && form && form.v.partes) infoPartes();
   if (e.target.id==='sValor') atualizarSimulacao();
   if (e.target.id==='pExtra') desenharPlano();
   if (e.target.id==='fPessoas' || (e.target.id==='fValor' && document.getElementById('divInfo'))) infoDivisao();
@@ -3797,3 +3838,5 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(()=>{}));
 }
+
+document.addEventListener('change', e => { if (e.target.dataset.partecat && form && form.v.partes){ form.v.partes[+e.target.dataset.partecat].cat = e.target.value; infoPartes(); } });
