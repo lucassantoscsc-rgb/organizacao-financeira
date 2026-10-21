@@ -10,7 +10,7 @@ const CONFIG = {
   // A conferência é feita no servidor (api/liberar.js).
   exigirCodigo: true,
   // Link que aparece na imagem da retrospectiva compartilhada (ex.: sua página de vendas). Vazio = só o nome do app.
-  linkDivulgacao: 'planilhadeorganizacaofinanceira.online',
+  linkDivulgacao: 'tinofinancas.com.br',
   // Suporte (central de ajuda em Ajustes). WhatsApp só com números, com DDI e DDD (ex.: '5511999999999'). Vazio = só e-mail.
   suporteEmail: 'suporteplanilhass@gmail.com',
   suporteWhatsApp: '',
@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 50;
+const APP_VERSAO = 51;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -80,7 +80,8 @@ const DEMO = /\/demo\/?$/.test(location.pathname) || new URLSearchParams(locatio
 // No endereço oficial (organizacao-financeira-seven.vercel.app) nada muda.
 const TESTE = /-lucas-santos-projects4\.vercel\.app$/.test(location.hostname) || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
 if (TESTE && !DEMO) CONFIG.exigirCodigo = false;
-const LINK_COMPRA = 'https://planilhadeorganizacaofinanceira.online';
+// Página de vendas do app (tinofinancas.com.br leva para /app; o domínio antigo continua funcionando).
+const LINK_COMPRA = 'https://www.tinofinancas.com.br';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
@@ -1309,7 +1310,7 @@ function enviarNps(){
 /* ---------- indique e ganhe ----------
    O amigo paga R$ 20 em vez de R$ 27 com o cupom; quem indica ganha a planilha a partir do primeiro amigo que comprar.
    Código, contagem e link da planilha vêm do servidor (api/indique). No endereço de teste o código é de exemplo. */
-const LINK_INDIQUE = LINK_COMPRA + '/app?ref=';
+const LINK_INDIQUE = 'https://tinofinancas.com.br/?ref=';   // curto para compartilhar; o redirecionamento mantém o ?ref
 let indique = null;
 function podeIndicar(){ return !DEMO && !!(S.conta || TESTE); }
 function cardIndique(){
