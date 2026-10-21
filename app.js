@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 60;
+const APP_VERSAO = 61;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -207,13 +207,13 @@ let memoFat = null;
 function faturas(){
   if (memoFat) return memoFat;
   memoFat = {};
-  const add = (k, cartao, valor, g) => (memoFat[k] = memoFat[k] || []).push({ cartao, valor, g });
+  const add = (k, cartao, valor, g, origem, i, n) => (memoFat[k] = memoFat[k] || []).push({ cartao, valor, g, origem, i, n });
   Object.entries(S.meses).forEach(([k,M]) => M.gastos.filter(g=>g.forma==='Crédito').forEach(g => {
     const c = cartaoPorId(g.cartao), pg = mesPagamento(g.data, k, c);
     if (ehParcelado(g)){
       const n = +g.parcelas, base = Math.floor(g.valor/n*100)/100;
-      for (let i=0;i<n;i++){ const a = somaMeses(pg.y, pg.m, i); add(key(a.y,a.m), c ? c.id : null, i===n-1 ? Math.round((g.valor - base*(n-1))*100)/100 : base, g); }
-    } else add(key(pg.y,pg.m), c ? c.id : null, +g.valor, g);
+      for (let i=0;i<n;i++){ const a = somaMeses(pg.y, pg.m, i); add(key(a.y,a.m), c ? c.id : null, i===n-1 ? Math.round((g.valor - base*(n-1))*100)/100 : base, g, k, i, n); }
+    } else add(key(pg.y,pg.m), c ? c.id : null, +g.valor, g, k, 0, 1);
   }));
   return memoFat;
 }
@@ -569,7 +569,18 @@ function abrirFatura(cid){
       <div id="boxFatParcial" hidden style="margin-top:12px">
         <div class="f"><label>Quanto você pagou?</label><input class="money num" id="fatPago" inputmode="decimal" placeholder="0,00"></div>
         <p class="note" style="margin:-4px 0 12px">O que faltar vira uma dívida de <b>rotativo do cartão</b> em Planejar → Dívidas. O rotativo costuma ter juros muito altos: tente quitar o quanto antes ou parcelar a fatura com o banco.</p>
-        <button class="btn pri" data-act="fatParcial" data-c="${cid}">Registrar pagamento parcial</button></div>`}`);
+        <button class="btn pri" data-act="fatParcial" data-c="${cid}">Registrar pagamento parcial</button></div>`}
+    ${listaCompraFatura(cid)}`);
+}
+// Compras que formam a fatura deste mês: dá para conferir com a fatura do banco e tocar para editar, excluir ou trocar o cartão.
+function listaCompraFatura(cid){
+  const xs = faturasDoMes(cur.y,cur.m).filter(x => x.cartao === cid).sort((a,b) => String(b.g.data||'').localeCompare(String(a.g.data||'')));
+  if (!xs.length) return '';
+  return `<h4 class="sub-h">🧾 Compras nesta fatura (${xs.length})</h4>
+    <div class="list flat">${xs.map(x => `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div>
+      <div class="tx"><div class="t1">${esc(x.g.desc || nomeCat(x.g.cat))}</div><div class="t2">${x.g.data ? fmtData(x.g.data) : ''}${x.n > 1 ? ` · <span class="tag cr">parcela ${x.i+1}/${x.n}</span>` : ''}</div></div>
+      <div class="val num">${brl(x.valor)}</div></button>`).join('')}</div>
+    <p class="note">Toque numa compra para corrigir o valor, trocar o cartão ou excluir.</p>`;
 }
 function pagarFatura(cid, valorPago, data){
   const c = cartaoPorId(cid), f = faturasPorCartao(cur.y,cur.m).find(x => x.cartao && x.cartao.id === cid); if (!c || !f) return;
@@ -2806,7 +2817,8 @@ function telaLanc(){
     const parcOutras = parcelasDoMes(cur.y,cur.m).filter(x=>x.i>0);
     const totMes = soma(gs.filter(g=>!ehParcelado(g)),g=>g.valor) + soma(parcelasDoMes(cur.y,cur.m),x=>x.valor);
     h += `<div class="totalrow"><span>Total de gastos</span><b class="num">${brl(totMes)}</b></div><div class="list">`;
-    faturasPorCartao(cur.y,cur.m).forEach(f => { h += `<div class="item"><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento}`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></div>`; });
+    faturasPorCartao(cur.y,cur.m).forEach(f => { const tag = f.cartao ? `button class="item" data-act="fatAbrir" data-c="${f.cartao.id}"` : 'div class="item"';
+      h += `<${tag}><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento} · toque para ver as compras`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></${tag.split(' ')[0]}>`; });
     gs.forEach(g=>{
       const parc = ehParcelado(g);
       h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
