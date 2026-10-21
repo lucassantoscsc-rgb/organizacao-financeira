@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 53;
+const APP_VERSAO = 54;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1640,8 +1640,8 @@ function abrirCategorias(){
   const ex = S.catsExtras || [], oc = S.catsOcultas || [];
   abrir(`<h2>🏷️ Minhas categorias</h2>
     <p class="note" style="margin:-6px 0 14px">As suas aparecem junto com as do app na hora de lançar um gasto.</p>
-    ${ex.length ? `<div class="cats-lista">${ex.map((x,i)=>`<button class="cat-item" data-act="catEditar" data-i="${i}"><span class="e">${emojiCat(x.c)}</span><span class="n">${esc(nomeCat(x.c))}</span>${x.ess?'<span class="tag auto">essencial</span>':''}<span class="muted">Editar ›</span></button>`).join('')}</div>` : '<p class="note" style="margin:0 0 12px">Você ainda não criou nenhuma.</p>'}
-    <button class="btn pri" data-act="catNova">+ Nova categoria</button>
+    <button class="btn pri" data-act="catNova" style="margin-bottom:14px">+ Nova categoria</button>
+    ${ex.length ? `<p class="note" style="margin:0 0 8px">Toque numa categoria para <b>editar</b>. Para criar outra, use <b>+ Nova categoria</b>.</p><div class="cats-lista">${ex.map((x,i)=>`<button class="cat-item" data-act="catEditar" data-i="${i}"><span class="e">${emojiCat(x.c)}</span><span class="n">${esc(nomeCat(x.c))}</span>${x.ess?'<span class="tag auto">essencial</span>':''}<span class="muted">Editar ›</span></button>`).join('')}</div>` : '<p class="note" style="margin:0 0 12px">Você ainda não criou nenhuma.</p>'}
     <h3 style="margin:22px 0 6px">Categorias do app</h3>
     <p class="note" style="margin:0 0 8px">Desligue as que você não usa. Os gastos antigos continuam como estão.</p>
     ${CATEGORIAS.filter(c => c !== OUTROS).map(c=>`<div class="switch"><span>${emojiCat(c)} ${esc(nomeCat(c))}</span><button class="tg ${oc.includes(c)?'':'on'}" data-act="catOcultar" data-c="${esc(c)}" aria-label="Mostrar ${esc(nomeCat(c))}"></button></div>`).join('')}
@@ -1650,11 +1650,12 @@ function abrirCategorias(){
 function abrirCatForm(i){
   const x = i >= 0 ? S.catsExtras[i] : null;
   catEd = { i, emoji: x ? emojiCat(x.c) : EMOJIS_CAT[0], ess: x ? !!x.ess : false };
-  abrir(`<h2>${x ? 'Editar categoria' : 'Nova categoria'}</h2>
+  abrir(`<h2>${x ? `Editar ${esc(x.c)}` : 'Nova categoria'}</h2>
+    ${x ? '<p class="note" style="margin:-6px 0 14px">Você está mudando esta categoria. Para criar outra, toque em Voltar e depois em <b>+ Nova categoria</b>.</p>' : ''}
     <div class="f"><label>Nome</label><input id="catNome" maxlength="20" value="${x ? esc(nomeCat(x.c)) : ''}" placeholder="Ex.: Cachorro, Filhos, Academia"></div>
     <div class="f"><label>Ícone</label><div class="emojis-cat">${EMOJIS_CAT.map(e=>`<button type="button" class="${e===catEd.emoji?'on':''}" data-act="catEmoji" data-e="${e}">${e}</button>`).join('')}</div></div>
     <div class="switch"><span>Gasto essencial <small class="muted">(contas, saúde, necessidade)</small></span><button class="tg ${catEd.ess?'on':''}" data-act="catEss" aria-label="Gasto essencial"></button></div>
-    <button class="btn pri" data-act="catSalvar" style="margin-top:14px">Salvar</button>
+    <button class="btn pri" data-act="catSalvar" style="margin-top:14px">${x ? 'Salvar alterações' : 'Criar categoria'}</button>
     ${x ? '<button class="btn sec" data-act="catApagar">Apagar categoria</button>' : ''}
     <button class="btn sec" data-act="categorias">Voltar</button>`);
   if (!x) setTimeout(() => { const el = document.getElementById('catNome'); if (el) el.focus(); }, 250);
@@ -1673,7 +1674,7 @@ function salvarCatForm(){
   if (todasCats().some(k => k !== antiga && normTxt(nomeCat(k)) === normTxt(nomeCat(c)))) return toast('Já existe uma categoria com esse nome');
   if (antiga){ S.catsExtras[catEd.i] = { c, ess:catEd.ess }; if (antiga !== c) trocarCategoria(antiga, c); }
   else S.catsExtras.push({ c, ess:catEd.ess });
-  salvar(); render(); abrirCategorias(); toast(antiga ? 'Categoria atualizada ✓' : 'Categoria criada ✓');
+  salvar(); render(); abrirCategorias(); toast(antiga ? 'Categoria atualizada ✓' : 'Categoria criada ✓ Para criar outra, toque em + Nova categoria');
 }
 function apagarCatForm(){
   const c = S.catsExtras[catEd.i].c;
