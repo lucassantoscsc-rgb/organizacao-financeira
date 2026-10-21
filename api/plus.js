@@ -92,6 +92,20 @@ module.exports = async (req, res) => {
       const [conta] = await sql`SELECT * FROM contas WHERE email = ${s.email}`;
       return res.json({ ok: true, conta: contaPublica(conta) });
     }
+    if (acao === 'waCodigo') {
+      // Código para ligar o WhatsApp: o cliente manda "TINO-XXXX" para o número do Tino (vale 15 minutos)
+      const L = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+      let codigo;
+      do { codigo = 'TINO-' + Array.from({ length: 4 }, () => L[crypto.randomInt(0, L.length)]).join(''); }
+      while ((await sql`SELECT 1 FROM wa_codigos WHERE codigo = ${codigo}`).length);
+      await sql`DELETE FROM wa_codigos WHERE email = ${s.email}`;
+      await sql`INSERT INTO wa_codigos (codigo, email, expira) VALUES (${codigo}, ${s.email}, now() + interval '15 minutes')`;
+      return res.json({ ok: true, codigo, numero: process.env.WHATSAPP_NUMERO || '15556663019' });
+    }
+    if (acao === 'waDesligar') {
+      await sql`UPDATE contas SET whatsapp = NULL WHERE email = ${s.email}`;
+      return res.json({ ok: true });
+    }
     if (acao === 'sair') {
       await sql`DELETE FROM sessoes WHERE token_hash = ${s.token_hash}`;
       return res.json({ ok: true });

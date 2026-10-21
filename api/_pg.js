@@ -37,6 +37,12 @@ async function criarTabelas() {
   // Convidados para testar o Plus antes do lançamento (liberados pelo painel admin)
   await sql`ALTER TABLE contas ADD COLUMN IF NOT EXISTS convidado boolean NOT NULL DEFAULT false`;
   await sql`ALTER TABLE contas ADD COLUMN IF NOT EXISTS convite_em timestamptz`;
+  // Códigos de 4 letras para ligar o WhatsApp à conta (o cliente manda "TINO-XXXX" para o número do Tino)
+  await sql`CREATE TABLE IF NOT EXISTS wa_codigos (
+    codigo text PRIMARY KEY,
+    email  text NOT NULL REFERENCES contas(email) ON DELETE CASCADE,
+    expira timestamptz NOT NULL
+  )`;
   // Dados sincronizados do app: uma linha por item (um gasto, um cartão, uma configuração...).
   // 'seq' cresce a cada alteração; cada aparelho guarda até onde já recebeu.
   await sql`CREATE SEQUENCE IF NOT EXISTS itens_seq`;

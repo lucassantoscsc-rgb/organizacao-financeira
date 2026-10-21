@@ -1,9 +1,10 @@
 {
   "name": "organizacao-financeira",
   "private": true,
-  "description": "App PWA. Dependências usadas só pelas funções em api/ (notificações e Tino Plus).",
+  "description": "App PWA. Dependências usadas só pelas funções em api/ (notificações, Tino Plus e assistente no WhatsApp).",
   "dependencies": {
     "web-push": "3.6.7",
-    "@neondatabase/serverless": "1.2.0"
+    "@neondatabase/serverless": "1.2.0",
+    "@anthropic-ai/sdk": "0.134.0"
   }
 }

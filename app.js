@@ -1534,8 +1534,30 @@ async function abrirPlus(){
     ${c.convidado ? '<p class="note" style="text-align:center;margin:0 0 14px">Obrigado por testar! Conte o que achou pelo e-mail de suporte (Ajustes → Ajuda).</p>' : ''}
     ${c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : ''}
     ${blocoSync()}
-    <p class="note" style="margin:14px 0">Em breve: o Tino no WhatsApp.</p>
+    ${blocoWhatsApp(c)}
     <button class="btn sec" data-act="plusSair">Sair do Plus neste aparelho</button>`);
+}
+// Tino no WhatsApp: o app gera um código, o cliente manda para o número do Tino e pronto.
+function blocoWhatsApp(c){
+  if (c.whatsapp) return `<h3 style="margin:18px 0 6px">💬 Tino no WhatsApp</h3>
+    <p class="note" style="margin:0 0 12px">✅ Conectado. Mande seus gastos para o Tino no WhatsApp, do seu jeito: "gastei 45 no mercado no pix", "uber 23 ontem", "tênis 600 em 3x no crédito". Eles aparecem aqui na próxima sincronização.</p>
+    <button class="link-sutil" data-act="waDesligar">Desconectar o WhatsApp</button>`;
+  if (!(syncEstado() || {}).ligado) return `<h3 style="margin:18px 0 6px">💬 Tino no WhatsApp</h3>
+    <p class="note" style="margin:0 0 12px">Ligue a sincronização acima para poder anotar seus gastos pelo WhatsApp.</p>`;
+  return `<h3 style="margin:18px 0 6px">💬 Tino no WhatsApp</h3>
+    <p class="note" style="margin:0 0 12px">Anote gastos mandando uma mensagem, sem abrir o app: "gastei 45 no mercado no pix".</p>
+    <button class="btn sec" data-act="waConectar">💬 Conectar WhatsApp</button><div id="waBox"></div>`;
+}
+function conectarWhatsApp(btn){
+  btn.disabled = true; btn.textContent = 'Gerando código…';
+  plusApi({ acao:'waCodigo' }).then(d => {
+    if (!d.ok){ btn.disabled = false; btn.textContent = '💬 Conectar WhatsApp'; return toast(d.erro || 'Não foi possível gerar o código'); }
+    btn.hidden = true;
+    const link = `https://wa.me/${d.numero}?text=${encodeURIComponent(d.codigo)}`;
+    document.getElementById('waBox').innerHTML = `<div class="ind-cod"><small>Seu código (vale 15 minutos)</small><b>${esc(d.codigo)}</b></div>
+      <a class="btn pri" href="${link}" target="_blank" rel="noopener">Abrir o WhatsApp e enviar o código</a>
+      <p class="note" style="margin:10px 0 0">A conversa abre com o código já escrito: é só tocar em enviar. O Tino responde confirmando. Depois, toque em "Ver minha conta Plus" de novo para atualizar.</p>`;
+  }).catch(() => { btn.disabled = false; btn.textContent = '💬 Conectar WhatsApp'; toast('Sem conexão. Tente de novo.'); });
 }
 function blocoSync(){
   const st = syncEstado();
@@ -3641,6 +3663,8 @@ document.addEventListener('click', e=>{
   if (a==='plusEntrar'){ plusEntrar(t); return; }
   if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); syncGuardar(null); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
   if (a==='syncLigar'){ ligarSync(t); return; }
+  if (a==='waConectar'){ conectarWhatsApp(t); return; }
+  if (a==='waDesligar'){ if (!confirm('Desconectar o WhatsApp do Tino?')) return; plusApi({ acao:'waDesligar' }).then(() => { toast('WhatsApp desconectado'); abrirPlus(); }); return; }
   if (a==='syncJuntar'){ rodarPrimeiraSync('juntar'); return; }
   if (a==='syncNuvem'){ rodarPrimeiraSync('nuvem'); return; }
   if (a==='syncAgora'){ t.disabled = true; t.textContent = 'Sincronizando…'; syncAgora(undefined, true).then(ok => { toast(ok ? 'Sincronizado ✓' : 'Não foi possível sincronizar agora'); abrirPlus(); }); return; }
