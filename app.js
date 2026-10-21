@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 57;
+const APP_VERSAO = 58;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1416,7 +1416,7 @@ function enviarNps(){
 }
 
 /* ---------- indique e ganhe ----------
-   O amigo paga R$ 20 em vez de R$ 27 com o cupom; quem indica ganha a planilha a partir do primeiro amigo que comprar.
+   O amigo paga R$ 20 em vez de R$ 27 pelo link do convite (oferta própria na Cakto, sem cupom); quem indica ganha a planilha a partir do primeiro amigo que comprar.
    Código, contagem e link da planilha vêm do servidor (api/indique). No endereço de teste o código é de exemplo. */
 const LINK_INDIQUE = 'https://tinofinancas.com.br/?ref=';   // curto para compartilhar; o redirecionamento mantém o ?ref
 let indique = null;
@@ -1443,7 +1443,7 @@ async function abrirIndique(intro){
     ${intro ? `<p class="note" style="margin:-4px 0 12px">${intro}</p>` : ''}
     <div class="ind-passos">
       <div><b>1</b><span>Mande o seu convite para um amigo</span></div>
-      <div><b>2</b><span>Ele paga <b>R$ 20</b> em vez de R$ 27 com o cupom <b>${esc(I.cupom)}</b></span></div>
+      <div><b>2</b><span>Pelo seu link, ele paga <b>R$ 20</b> em vez de R$ 27, com o desconto já aplicado</span></div>
       <div><b>3</b><span>Você ganha a <b>Planilha de Organização Financeira</b> (R$ 17) quando o primeiro amigo comprar</span></div>
     </div>
     <div class="ind-cod"><small>Seu código</small><b>${esc(I.codigo)}</b></div>
@@ -1455,7 +1455,7 @@ async function abrirIndique(intro){
     <p class="note" style="margin:14px 0 0">Se o amigo não usar o seu link, peça para ele digitar o seu código no app (Ajustes → Indique e ganhe) em até 30 dias depois da compra.</p>
     ${!I.indicado ? '<button class="link-sutil" data-act="indiqueUsar">Alguém te indicou? Digite o código</button>' : ''}`);
 }
-function textoConvite(){ return `Estou usando o Tino Finanças para organizar meu dinheiro. Com o meu convite você paga R$ 20 em vez de R$ 27 (cupom ${indique.cupom}): ${LINK_INDIQUE + indique.codigo}`; }
+function textoConvite(){ return `Estou usando o Tino Finanças para organizar meu dinheiro. Com o meu convite você paga R$ 20 em vez de R$ 27, com o desconto já aplicado neste link: ${LINK_INDIQUE + indique.codigo}`; }
 function abrirUsarIndicacao(){
   abrir(`<h2>Quem te indicou?</h2>
     <p class="note" style="margin:-4px 0 14px">Digite o código de quem te indicou o Tino. Assim essa pessoa ganha o presente dela. Vale até 30 dias depois da compra.</p>
