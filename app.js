@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 59;
+const APP_VERSAO = 60;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2226,10 +2226,11 @@ function cardEsteMes(C){
   const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]).slice(0,3), max = cats.length ? cats[0][1] : 1;
   return `<section class="card mes-resumo">
     <div class="mr-nums">
-      <div><span>Entrou</span><b class="num">${brl0(C.entradas)}</b></div>
+      <div><span>Entrou</span><b class="num">${brl0(C.entradas - (C.saldoAnterior||0))}</b></div>
       <div><span>Saiu</span><b class="num">${brl0(C.saidas + C.reservas)}</b></div>
       <div><span>Sobrou</span><b class="num ${C.restante<0 && !S.ocultar?'neg':''}">${brl0(C.restante)}</b></div>
     </div>
+    ${Math.abs(C.saldoAnterior||0) >= 0.5 ? `<p class="note" style="margin:-6px 0 12px">${C.saldoAnterior > 0 ? `O que sobrou inclui <b>${brl0(C.saldoAnterior)}</b> que vieram de ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.` : `O que sobrou já desconta <b>${brl0(-C.saldoAnterior)}</b> que faltaram em ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.`}</p>` : ''}
     ${cats.length ? `<div class="hbars mr-cats">${cats.map(([c,v])=>`<button class="hb" data-cat="${esc(c)}" aria-label="${esc(nomeCat(c))}: ${brl(v)}">
       <span class="hb-l"><span class="hb-e">${emojiCat(c)}</span>${esc(nomeCat(c))}</span><span class="hb-v num">${brl(v)}</span>
       <span class="hb-t"><span style="width:${Math.max(v/max*100,1.5)}%"></span></span></button>`).join('')}</div>` : ''}
