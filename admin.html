@@ -99,6 +99,15 @@ main{max-width:760px}
       <div id="lista"></div>
     </div>
     <div class="card">
+      <h2>⭐ Tino Plus: convidados <span style="font-weight:400;color:var(--muted)">(teste antes do lançamento)</span></h2>
+      <form class="ads-form" onsubmit="plusConvidar(event)">
+        <div style="flex:1;min-width:220px"><label for="plEmail">E-mail do cliente (o mesmo da compra)</label><input id="plEmail" type="email" placeholder="cliente@email.com" style="width:100%"></div>
+        <div><label for="plDias">Dias de teste</label><input id="plDias" type="number" min="1" max="365" value="60" style="width:90px"></div>
+        <button type="submit">Convidar</button>
+      </form>
+      <div id="plLista"></div>
+    </div>
+    <div class="card">
       <h2>Lista de espera: Tino Conectado</h2>
       <div class="stats" id="listaStats"></div>
       <div id="listaResumo"></div>
@@ -137,7 +146,29 @@ async function entrar(){
 const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const data = iso => iso ? new Date(iso).toLocaleString('pt-BR',{dateStyle:'short',timeStyle:'short'}) : '';
 
-async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); carregarLista(); carregarMetricas(); }
+async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(); carregarDeps(); carregarLista(); carregarMetricas(); carregarPlus(); }
+/* Tino Plus: quem foi convidado, se já entrou (sessões) e se já sincronizou (itens no servidor). */
+async function carregarPlus(){
+  let d; try { d = await api({ acao:'plusLista' }); } catch(e){ return; }
+  const el = document.getElementById('plLista');
+  el.innerHTML = d.lista.length ? d.lista.map(x => `<div class="item"><span class="c">${esc(x.email)}</span>
+      ${+x.itens ? '<span class="tag ok">sincronizando</span>' : +x.sessoes ? '<span class="tag l">entrou</span>' : '<span class="tag no">ainda não entrou</span>'}${x.fundador ? ' <span class="tag u">fundador</span>' : ''}
+      <span class="acts"><button class="del" data-pl-remover="${esc(x.email)}">Remover</button></span>
+      <span class="n">Convidado em ${data(x.convite_em)} · teste até ${x.plus_ate ? new Date(x.plus_ate).toLocaleDateString('pt-BR') : '—'} · ${+x.itens} itens no servidor${x.ultima ? ' · última sincronização ' + data(x.ultima) : ''}</span></div>`).join('')
+    : '<p class="aviso" style="margin-top:6px">Ninguém convidado ainda. O convidado vê o Tino Plus no app (Ajustes) na próxima vez que abrir.</p>';
+}
+async function plusConvidar(e){
+  e.preventDefault();
+  const email = document.getElementById('plEmail').value.trim(), dias = document.getElementById('plDias').value;
+  const d = await api({ acao:'plusConvidar', email, dias });
+  document.getElementById('plEmail').value = ''; carregarPlus();
+  alert('Convite liberado ✓' + (d.fundador ? ' (é comprador do app: fundador)' : '\nAtenção: este e-mail não comprou o app. Ele só verá o Plus se entrar no app com este e-mail.'));
+}
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-pl-remover]'); if (!b) return;
+  if (!confirm('Remover o convite de ' + b.dataset.plRemover + '? Os dados dele continuam guardados, mas a sincronização para.')) return;
+  await api({ acao:'plusRemover', email:b.dataset.plRemover }); carregarPlus();
+});
 
 /* ---------- métricas ----------
    Datas no horário de Brasília. Vendas por dia vêm dos compradores ativos (data da compra); reembolsos e

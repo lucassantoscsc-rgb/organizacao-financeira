@@ -35,7 +35,7 @@ async function enviarCodigo(email, codigo) {
   if (!r.ok) throw new Error('Falha ao enviar o e-mail (' + r.status + ')');
 }
 
-const contaPublica = (c) => ({ email: c.email, plano: c.plano, plusAte: c.plus_ate, fundador: c.fundador, whatsapp: !!c.whatsapp,
+const contaPublica = (c) => ({ email: c.email, plano: c.plano, plusAte: c.plus_ate, fundador: c.fundador, whatsapp: !!c.whatsapp, convidado: !!c.convidado,
   plusAtivo: plusAtivo(c) });
 
 module.exports = async (req, res) => {
@@ -75,6 +75,15 @@ module.exports = async (req, res) => {
       const token = crypto.randomBytes(32).toString('base64url');
       await sql`INSERT INTO sessoes (token_hash, email, aparelho, expira) VALUES (${hash(token)}, ${email}, ${aparelho}, now() + interval '90 days')`;
       return res.json({ ok: true, token, conta: contaPublica(conta) });
+    }
+
+    if (acao === 'convite') {
+      const conta = String((req.body || {}).conta || '').trim().toLowerCase(), ap = String((req.body || {}).aparelho || '').slice(0, 64);
+      if (!emailOk(conta) || !ap) return res.status(400).json({ ok: false });
+      const u = JSON.parse((await redis('HGET', 'usos', conta)) || '{}');
+      if (!(u.aparelhos || []).includes(ap)) return res.status(403).json({ ok: false });
+      const [c] = await sql`SELECT * FROM contas WHERE email = ${conta}`;
+      return res.json({ ok: true, convidado: !!(c && c.convidado && plusAtivo(c)), ate: c ? c.plus_ate : null });
     }
 
     const s = await sessao(req, sql);

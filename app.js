@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 56;
+const APP_VERSAO = 57;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1448,6 +1448,22 @@ function confirmarIndicacao(btn){
    Login com código de 6 dígitos enviado por e-mail (api/plus). A sessão fica numa chave própria do aparelho,
    fora do S, para não ir junto nos arquivos de backup. */
 const PLUS_KEY = 'orgfin:plus';
+// Convidados para testar o Plus (liberados no painel admin). O app confere uma vez por dia.
+const plusVisivel = () => !DEMO && (TESTE || !!S.plusConvite || !!plusSessao());
+function conferirConvitePlus(){
+  if (DEMO || TESTE || !S.conta || !S.conta.includes('@') || !navigator.onLine || S.plusConviteVisto === dataHoje()) return;
+  fetch('api/plus', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'convite', conta:S.conta, aparelho:idAparelho() }) })
+    .then(r => r.ok ? r.json() : null).then(d => {
+      if (!d || !d.ok) return;
+      const antes = !!S.plusConvite; S.plusConvite = !!d.convidado; S.plusConviteVisto = dataHoje(); salvar();
+      if (antes !== S.plusConvite && !ocupado()) render();
+    }).catch(() => {});
+}
+function cardConvitePlus(){
+  if (!S.plusConvite || S.plusAvisoVisto || plusSessao()) return '';
+  return `<div class="alert info backup"><span>⭐</span><div><b>Você foi convidado para testar o Tino Plus</b><br>Seus dados em todos os aparelhos, sempre sincronizados. Você testa antes de todo mundo.
+    <div class="acts"><button class="btn sec" data-act="plusConviteVer">Quero testar</button><button class="btn sec" data-act="plusConviteDepois">Depois</button></div></div></div>`;
+}
 function plusSessao(){ try { return JSON.parse(localStorage.getItem(PLUS_KEY) || 'null'); } catch(e){ return null; } }
 function plusGuardar(v){ try { v ? localStorage.setItem(PLUS_KEY, JSON.stringify(v)) : localStorage.removeItem(PLUS_KEY); } catch(e){} }
 function plusApi(dados, rota){
@@ -1472,7 +1488,8 @@ async function abrirPlus(){
   const c = d.conta;
   abrir(`<h2>⭐ Tino Plus</h2>
     <p class="note" style="margin:-4px 0 14px">Conectado como <b>${esc(c.email)}</b>.</p>
-    <div class="ind-cod"><small>Seu plano</small><b style="letter-spacing:0">${c.plusAtivo ? 'Plus ativo' : 'Gratuito'}</b></div>
+    <div class="ind-cod"><small>Seu plano</small><b style="letter-spacing:0">${c.plusAtivo ? (c.convidado ? 'Plus (teste)' : 'Plus ativo') : 'Gratuito'}</b>${c.plusAtivo && c.plusAte ? `<small style="margin-top:4px">até ${new Date(c.plusAte).toLocaleDateString('pt-BR')}</small>` : ''}</div>
+    ${c.convidado ? '<p class="note" style="text-align:center;margin:0 0 14px">Obrigado por testar! Conte o que achou pelo e-mail de suporte (Ajustes → Ajuda).</p>' : ''}
     ${c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : ''}
     ${blocoSync()}
     <p class="note" style="margin:14px 0">Em breve: o Tino no WhatsApp.</p>
@@ -2393,7 +2410,7 @@ function variacao(atual, anterior, menorMelhor){
 // últimos lançamentos. Gráficos, fluxo, orçamentos, assinaturas e cofrinhos ficam na Análise do mês.
 function telaResumo(){
   const C = calc(cur.y,cur.m);
-  const avisos = [cardPassos, alertasContas, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
+  const avisos = [cardPassos, alertasContas, cardConvitePlus, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
     cardRetro, cardTagAtiva, cardIndique, dicaTransferir, () => !S.listaDispensada && !precisaBackup() ? cardConectado() : ''];
   let aviso = '';
   for (const f of avisos){ aviso = f(); if (aviso) break; }
@@ -3181,8 +3198,8 @@ function telaAjustes(){
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const tema = S.tema || 'auto';
-  return `${TESTE ? `<section class="card"><h3>⭐ Tino Plus <small class="muted">(em construção)</small></h3>
-    <p class="note" style="margin:0 0 12px">${plusSessao() ? `Conectado como <b>${esc(plusSessao().email)}</b>.` : 'Entre com o seu e-mail para testar o login do Plus.'}</p>
+  return `${plusVisivel() ? `<section class="card"><h3>⭐ Tino Plus <small class="muted">(${TESTE ? 'em construção' : 'teste para convidados'})</small></h3>
+    <p class="note" style="margin:0 0 12px">${plusSessao() ? `Conectado como <b>${esc(plusSessao().email)}</b>.` : TESTE ? 'Entre com o seu e-mail para testar o login do Plus.' : 'Você foi convidado para testar o Tino Plus antes do lançamento: seus dados em todos os aparelhos, sempre sincronizados.'}</p>
     <button class="btn sec" data-act="plus">${plusSessao() ? 'Ver minha conta Plus' : 'Entrar no Tino Plus'}</button></section>` : ''}
   <section class="card"><h3>Aparência</h3>
     <div class="temas">${[['auto','Automático'],['claro','☀️ Claro'],['escuro','🌙 Escuro']].map(([v,l])=>`<button class="${tema===v?'on':''}" data-act="tema" data-v="${v}">${l}</button>`).join('')}</div>
@@ -3551,6 +3568,8 @@ document.addEventListener('click', e=>{
   if (a==='npsEnviar'){ enviarNps(); return; }
   if (a==='npsDepois'){ S.nps = { ...(S.nps||{}), vezes:((S.nps||{}).vezes||0)+1, depoisDe: new Date(Date.now()+14*864e5).toISOString() }; salvar(); fechar(); return; }
   if (a==='plus'){ abrirPlus(); return; }
+  if (a==='plusConviteVer'){ S.plusAvisoVisto = true; salvar(); render(); abrirPlus(); return; }
+  if (a==='plusConviteDepois'){ S.plusAvisoVisto = true; salvar(); render(); return; }
   if (a==='plusPedir'){ plusPedir(t); return; }
   if (a==='plusEntrar'){ plusEntrar(t); return; }
   if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); syncGuardar(null); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
@@ -4135,6 +4154,7 @@ function iniciarApp(){
   setTimeout(talvezPedirNps, 3500);
   setTimeout(backupAutomatico, 4000);
   agendarSync(1500);
+  setTimeout(conferirConvitePlus, 2000);
 }
 if (TESTE && !DEMO){
   document.body.classList.add('demo');

@@ -52,6 +52,28 @@ module.exports = async (req, res) => {
       lista.sort((a, b) => b.em.localeCompare(a.em));
       return res.json({ ok: true, lista });
     }
+    if (acao === 'plusConvidar' || acao === 'plusRemover' || acao === 'plusLista') {
+      const { banco } = require('./_pg'); const sql = await banco();
+      const email = String(req.body.email || '').trim().toLowerCase();
+      if (acao === 'plusConvidar') {
+        if (!/^\S+@\S+\.\S+$/.test(email)) return res.status(400).json({ ok: false, erro: 'Confira o e-mail' });
+        const dias = Math.min(365, Math.max(1, parseInt(req.body.dias, 10) || 60));
+        const fundador = !!(await redis('HGET', 'codigos', email));
+        await sql`INSERT INTO contas (email, plano, plus_ate, fundador, convidado, convite_em) VALUES (${email}, 'plus', now() + (${dias}::int * interval '1 day'), ${fundador}, true, now())
+          ON CONFLICT (email) DO UPDATE SET plano = 'plus', plus_ate = EXCLUDED.plus_ate, convidado = true, convite_em = now(), fundador = contas.fundador OR EXCLUDED.fundador`;
+        return res.json({ ok: true, fundador });
+      }
+      if (acao === 'plusRemover') {
+        await sql`UPDATE contas SET plano = 'gratis', plus_ate = NULL, convidado = false WHERE email = ${email}`;
+        return res.json({ ok: true });
+      }
+      const lista = await sql`SELECT c.email, c.plus_ate, c.convite_em, c.fundador,
+          (SELECT count(*) FROM sessoes s WHERE s.email = c.email) AS sessoes,
+          (SELECT count(*) FROM itens i WHERE i.email = c.email AND NOT i.apagado) AS itens,
+          (SELECT max(i.alterado) FROM itens i WHERE i.email = c.email) AS ultima
+        FROM contas c WHERE c.convidado ORDER BY c.convite_em DESC`;
+      return res.json({ ok: true, lista });
+    }
     if (acao === 'emailTeste') {
       // Manda um dos e-mails automáticos para o endereço digitado (para conferir como chega).
       const { MODELOS, enviarEmail } = require('./_emails');

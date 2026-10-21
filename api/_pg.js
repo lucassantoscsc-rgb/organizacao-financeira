@@ -34,6 +34,9 @@ async function criarTabelas() {
     expira     timestamptz NOT NULL
   )`;
   await sql`CREATE INDEX IF NOT EXISTS sessoes_email ON sessoes(email)`;
+  // Convidados para testar o Plus antes do lançamento (liberados pelo painel admin)
+  await sql`ALTER TABLE contas ADD COLUMN IF NOT EXISTS convidado boolean NOT NULL DEFAULT false`;
+  await sql`ALTER TABLE contas ADD COLUMN IF NOT EXISTS convite_em timestamptz`;
   // Dados sincronizados do app: uma linha por item (um gasto, um cartão, uma configuração...).
   // 'seq' cresce a cada alteração; cada aparelho guarda até onde já recebeu.
   await sql`CREATE SEQUENCE IF NOT EXISTS itens_seq`;
