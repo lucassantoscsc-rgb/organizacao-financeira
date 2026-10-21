@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 52;
+const APP_VERSAO = 53;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -211,6 +211,11 @@ function faturasPorCartao(y,m){
   const t = {}; faturasDoMes(y,m).forEach(x => { t[x.cartao||''] = (t[x.cartao||''] || 0) + x.valor; });
   return Object.entries(t).map(([id,valor]) => ({ cartao: cartaoPorId(id) || null, valor })).filter(x=>x.valor>0.004);
 }
+// Pagamento da fatura (opcional): S.faturasPagas['<cartão>|<AAAA-MM>'] = { pago: valor pago, em: data, divida: id }.
+// Sem registro, a fatura conta inteira como saída no mês do vencimento (como sempre foi). Paga só em parte, o resto
+// vira uma dívida de rotativo e só o valor pago entra nas saídas.
+const fatKey = (cid, y, m) => cid + '|' + key(y,m);
+const statusFatura = (cid, y, m) => (S.faturasPagas || {})[fatKey(cid, y, m)] || null;
 const vencFatura = (cartao, y, m) => key(y,m) + '-' + String(Math.min(cartao.vencimento, diasNoMes(y,m))).padStart(2,'0');
 // Limite usado: tudo o que ainda vai ser pago (faturas deste mês em diante).
 function limiteUsado(id){
@@ -415,9 +420,13 @@ function abrirPessoa(p){
   const pend = pendentes().filter(r=>r.pessoa===p), recebidos = (S.aReceber||[]).filter(r=>r.pessoa===p && r.recebido).slice(-10).reverse();
   abrir(`<h2>👤 ${esc(p)}</h2>
     ${pend.length ? `<p class="sim-txt">Te deve <b>${brl(soma(pend, r=>r.valor))}</b>.</p>
-    <div class="list flat">${pend.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">${fmtData(r.data)}${r.gastoId?' · gasto dividido':''}</div></div><div class="val num">${brl(r.valor)}</div><button class="btn sec mini" data-act="receber" data-ids="${r.id}">Recebi</button></div>`).join('')}</div>
+    <div class="list flat">${pend.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">${fmtData(r.data)}${r.gastoId?' · gasto dividido':''}</div></div><div class="val num">${brl(r.valor)}</div><button class="btn sec mini" data-act="receber" data-ids="${r.id}">Recebi</button><button class="tirar-rec" data-act="excluirReceber" data-id="${r.id}" aria-label="Excluir">🗑️</button></div>`).join('')}</div>
     <div class="switch f" style="margin-top:12px"><span>Lançar como entrada ao receber</span><button type="button" class="tg ${S.lancarRecebidos!==false?'on':''}" data-act="tgLancarRec"></button></div>
     <div class="row2"><button class="btn pri" data-act="receber" data-ids="${pend.map(r=>r.id).join(',')}">Recebi tudo</button><button class="btn sec" data-act="cobrar" data-pessoa-nome="${esc(p)}">📲 Cobrar</button></div>
+    <button class="btn sec" data-act="receberParteAbrir" style="margin-top:10px">Recebi uma parte</button>
+    <div id="boxRecParte" hidden style="margin-top:12px"><div class="f"><label>Quanto ${esc(p)} te pagou?</label><input class="money num" id="recParte" inputmode="decimal" placeholder="0,00"></div>
+      <p class="note" style="margin:-4px 0 12px">Abate primeiro o que é mais antigo. O que faltar continua pendente.</p>
+      <button class="btn pri" data-act="receberParte" data-pessoa-nome="${esc(p)}">Registrar</button></div>
     <div class="f" style="margin-top:12px"><label>Sua chave Pix (vai na mensagem de cobrança)</label><input id="chavePix" placeholder="Opcional: CPF, celular, e-mail…" value="${esc(S.chavePix||'')}" autocomplete="off"></div>` : '<p class="gprev ok">Nada pendente com esta pessoa. 🎉</p>'}
     ${recebidos.length ? `<h4 class="sub-h">Já recebidos</h4><div class="list flat">${recebidos.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">recebido em ${fmtData(r.recebidoEm)}</div></div><div class="val num up">${brl(r.valor)}</div></div>`).join('')}</div>` : ''}`);
 }
@@ -427,6 +436,22 @@ function receber(ids){
   rs.forEach(r => { r.recebido = true; r.recebidoEm = hojeTxt; });
   if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(total*100)/100, data:hojeTxt, reembolso:true }); }
   salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(total)} de ${p} ✓`);
+}
+// Recebimento parcial: abate das pendências mais antigas; a que for paga só em parte é dividida em duas
+// (a parte recebida vai para o histórico e o resto continua pendente).
+function receberParte(p, valor){
+  const pend = pendentes().filter(r => r.pessoa === p).sort((a,b) => String(a.data||'').localeCompare(String(b.data||'')));
+  const total = soma(pend, r => r.valor);
+  if (!(valor > 0)) return toast('Digite quanto você recebeu');
+  if (valor > total + 0.004) return toast(`${p} te deve ${brl(total)}. Use "Recebi tudo".`);
+  const hojeTxt = dataHoje(); let resto = valor;
+  for (const r of pend){
+    if (resto <= 0.004) break;
+    if (resto >= r.valor - 0.004){ r.recebido = true; r.recebidoEm = hojeTxt; resto = Math.round((resto - r.valor) * 100) / 100; }
+    else { S.aReceber.push({ ...r, id:uid(), desc:r.desc + ' (parte)', valor:resto, recebido:true, recebidoEm:hojeTxt, parteDe:r.id }); r.valor = Math.round((r.valor - resto) * 100) / 100; resto = 0; }
+  }
+  if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(valor*100)/100, data:hojeTxt, reembolso:true }); }
+  salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(valor)} de ${p} ✓`);
 }
 function cobrar(p){
   const pend = pendentes().filter(r=>r.pessoa===p), total = soma(pend, r=>r.valor);
@@ -482,6 +507,40 @@ function cardCartoes(){
       ${c.limite ? `<span class="bar"><span style="width:${pct}%"></span></span><span class="foot"><span>Limite usado ${brl(usado)}</span><span>Disponível ${brl(Math.max(0,c.limite-usado))}</span></span>` : ''}</button>`;
   });
   return h + `<button class="btn sec" data-act="novoCartao">+ Adicionar cartão</button></section>`;
+}
+function abrirFatura(cid){
+  const c = cartaoPorId(cid), f = faturasPorCartao(cur.y,cur.m).find(x => x.cartao && x.cartao.id === cid); if (!c || !f) return;
+  const st = statusFatura(cid, cur.y, cur.m), parcial = st && st.pago < f.valor - 0.004;
+  abrir(`<h2>💳 Fatura ${esc(c.nome)}</h2>
+    <p class="sim-txt">${MESES[cur.m]} · vence dia ${c.vencimento} · <b>${brl(f.valor)}</b></p>
+    ${st ? `<p class="gprev ok">${parcial ? `Você pagou <b>${brl(st.pago)}</b>. O restante (${brl(f.valor - st.pago)}) virou uma dívida de rotativo em Planejar → Dívidas.` : `✓ Fatura paga${st.em ? ' em ' + fmtData(st.em) : ''}.`}</p>
+      <button class="btn sec" data-act="fatDesfazer" data-c="${cid}">Desfazer</button>`
+    : `<button class="btn pri" data-act="fatPagar" data-c="${cid}">✓ Marquei como paga</button>
+      <button class="btn sec" data-act="fatParcialAbrir">Paguei só uma parte</button>
+      <div id="boxFatParcial" hidden style="margin-top:12px">
+        <div class="f"><label>Quanto você pagou?</label><input class="money num" id="fatPago" inputmode="decimal" placeholder="0,00"></div>
+        <p class="note" style="margin:-4px 0 12px">O que faltar vira uma dívida de <b>rotativo do cartão</b> em Planejar → Dívidas. O rotativo costuma ter juros muito altos: tente quitar o quanto antes ou parcelar a fatura com o banco.</p>
+        <button class="btn pri" data-act="fatParcial" data-c="${cid}">Registrar pagamento parcial</button></div>`}`);
+}
+function pagarFatura(cid, valorPago){
+  const c = cartaoPorId(cid), f = faturasPorCartao(cur.y,cur.m).find(x => x.cartao && x.cartao.id === cid); if (!c || !f) return;
+  S.faturasPagas = S.faturasPagas || {};
+  const reg = { pago: Math.min(valorPago ?? f.valor, f.valor), em: dataHoje() }, resto = Math.round((f.valor - reg.pago) * 100) / 100;
+  if (resto > 0.004){
+    const d = { id:uid(), nome:`Saldo da fatura ${c.nome} (${MES_CURTO[cur.m]}/${String(cur.y).slice(2)})`, tipo:'rotativo', saldo:resto, juros:0, parcela:0,
+      venc:c.vencimento, inicial:resto, criada:dataHoje(), pagamentos:[], fatura:fatKey(cid, cur.y, cur.m) };
+    S.dividas = S.dividas || []; S.dividas.push(d); reg.divida = d.id;
+  }
+  S.faturasPagas[fatKey(cid, cur.y, cur.m)] = reg; salvar(); render();
+  if (resto > 0.004){ abrirDivida(reg.divida); toast(`Pagamento registrado. ${brl(resto)} viraram dívida de rotativo`); }
+  else { fechar(); toast('Fatura marcada como paga ✓'); }
+}
+function desfazerFatura(cid){
+  const k = fatKey(cid, cur.y, cur.m), reg = (S.faturasPagas || {})[k]; if (!reg) return;
+  const d = reg.divida && (S.dividas || []).find(x => x.id === reg.divida);
+  if (d && !confirm(`Desfazer o pagamento? A dívida "${d.nome}" também será apagada.`)) return;
+  if (d) S.dividas = S.dividas.filter(x => x.id !== d.id);
+  delete S.faturasPagas[k]; salvar(); render(); fechar(); toast('Pagamento da fatura desfeito');
 }
 function editarCartao(id){
   const c = id ? cartaoPorId(id) : { nome:'', fechamento:'', vencimento:'', limite:0 };
@@ -2004,7 +2063,8 @@ function calc(y,m){
 
   const entradasLanc = soma(M.entradas, e=>e.valor);
   const saldoAnterior = (S.carry && P) ? P.restante : 0;
-  const faturaAnterior = soma(faturasDoMes(y,m), x=>x.valor);   // faturas pagas neste mês (compras no crédito de meses/faturas anteriores)
+  // faturas pagas neste mês (compras no crédito de meses/faturas anteriores); paga só em parte, conta o que foi pago
+  const faturaAnterior = soma(faturasPorCartao(y,m), f => { const st = f.cartao && statusFatura(f.cartao.id, y, m); return st ? Math.min(st.pago, f.valor) : f.valor; });
   const gastosVista = soma(simples.filter(g=>g.forma!=='Crédito'), g=>g.valor);
   const credito = soma(simples.filter(g=>g.forma==='Crédito'), g=>g.valor) + soma(parc, x=>x.valor);
   const debito = soma(simples.filter(g=>g.forma==='Débito'), g=>g.valor);
@@ -2374,7 +2434,7 @@ function alertasContas(){
   if (key(cur.y,cur.m) !== chaveHoje()) return '';
   const M = mes(cur.y,cur.m);
   const lst = M.contas.map(c=>({c, s:statusConta(c,cur.y,cur.m)})).filter(x=>x.s && x.s.cls);
-  faturasPorCartao(cur.y,cur.m).forEach(f => { if (!f.cartao) return; const s = statusConta({ pago:false, venc:f.cartao.vencimento }, cur.y, cur.m);
+  faturasPorCartao(cur.y,cur.m).forEach(f => { if (!f.cartao || statusFatura(f.cartao.id, cur.y, cur.m)) return; const s = statusConta({ pago:false, venc:f.cartao.vencimento }, cur.y, cur.m);
     if (s && s.cls && s.t !== 'atrasada') lst.push({ c:{ nome:'Fatura ' + f.cartao.nome }, s }); });
   if (!lst.length) return '';
   return `<button class="alert warnbox" data-tab="contas"><span>⏰</span><div><b>${lst.length===1?'1 conta precisa':'' + lst.length + ' contas precisam'} de atenção</b><br>
@@ -2735,8 +2795,9 @@ function diasDoMes(y, m){
     else { const d = c.venc ? Math.min(+c.venc, D) : 0; dias[d].aVencer++;
       dias[d].itens.push({ tipo:'contas', id:c.id, mk:k, ic:'⏰', t:c.nome, s:'Conta a vencer', v:-(c.planejado||c.valor), pendente:true }); }
   });
-  faturasPorCartao(y,m).forEach(f => { if (!f.cartao) return; const d = Math.min(f.cartao.vencimento, D); dias[d].aVencer++;
-    dias[d].itens.push({ tipo:'fatura', ic:'💳', t:'Fatura ' + f.cartao.nome, s:'Vencimento da fatura', v:-f.valor, pendente:true }); });
+  faturasPorCartao(y,m).forEach(f => { if (!f.cartao) return; const d = Math.min(f.cartao.vencimento, D), st = statusFatura(f.cartao.id, y, m);
+    if (!st) dias[d].aVencer++;
+    dias[d].itens.push({ tipo:'fatura', ic: st ? '✅' : '💳', t:'Fatura ' + f.cartao.nome, s: st ? (st.pago < f.valor - 0.004 ? 'Fatura paga em parte' : 'Fatura paga') : 'Vencimento da fatura', v:-(st ? Math.min(st.pago, f.valor) : f.valor), pendente:!st }); });
   M.reservas.forEach(r => { const d = dia(r.data); const c = cofPorId(cofDe(r));
     dias[d].itens.push({ tipo:'reservas', id:r.id, mk:k, ic:c?c.emoji:'📈', t:r.nome||(c?c.nome:r.tipo), s:r.valor<0?'Retirada':'Guardado', v:-r.valor }); });
   return dias;
@@ -2831,6 +2892,17 @@ function telaContas(){
   });
   if (!M.contas.length) h += vazio('📄','Nenhuma conta neste mês','Cadastre aluguel, energia, internet, parcelas…');
   h += `</div><button class="btn sec" data-act="addConta">+ Adicionar conta</button>`;
+  const fats = faturasPorCartao(cur.y,cur.m).filter(f => f.cartao);
+  if (fats.length){
+    h += `<h4 class="sub-h">💳 Faturas do cartão</h4><div class="list">`;
+    fats.forEach(f => { const c = f.cartao, st = statusFatura(c.id, cur.y, cur.m), parcial = st && st.pago < f.valor - 0.004;
+      const sc = statusConta({ pago:!!st, venc:c.vencimento }, cur.y, cur.m);
+      const situacao = st ? (parcial ? `Paga em parte: ${brl(st.pago)}` : 'Paga' + (st.em ? ' em ' + fmtData(st.em) : '')) : sc ? `<span class="tag ${sc.cls}">${sc.t}</span>` : `Vence dia ${c.vencimento}`;
+      h += `<div class="item"><button class="check ${st?'on':''}" data-act="fatCheck" data-c="${c.id}" aria-label="Marcar fatura como paga">${st?'✓':''}</button>
+        <button class="tx" style="text-align:left" data-act="fatAbrir" data-c="${c.id}"><div class="t1">Fatura ${esc(c.nome)}</div><div class="t2">${situacao}</div></button>
+        <div class="val num" style="${st?'':'color:var(--muted)'}">${brl(f.valor)}</div></div>`; });
+    h += `</div>`;
+  }
   if (Mp.contas.length) h += `<button class="btn sec" data-act="copiarContas">Copiar contas de ${MESES[p.m]} (${Mp.contas.length})</button>`;
   h += `<p class="note" style="margin-top:12px">Marque ✓ quando pagar. Só as contas pagas entram nas saídas do mês. Ao começar um mês novo, suas contas são copiadas automaticamente.</p>`;
   return h;
@@ -3377,6 +3449,16 @@ document.addEventListener('click', e=>{
   else if (a==='divCatsTirar'){ form.v.partes.splice(+t.dataset.i, 1); if (!form.v.partes.length) form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
   else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
   else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
+  else if (a==='receberParteAbrir'){ document.getElementById('boxRecParte').hidden = false; t.hidden = true; document.getElementById('recParte').focus(); }
+  else if (a==='receberParte'){ receberParte(t.dataset.pessoaNome, parseValor(document.getElementById('recParte').value)); }
+  else if (a==='excluirReceber'){ const r = (S.aReceber||[]).find(x => x.id === t.dataset.id); if (!r || !confirm(`Excluir "${r.desc}" (${brl(r.valor)}) de ${r.pessoa}?`)) return;
+    S.aReceber = S.aReceber.filter(x => x.id !== r.id); salvar(); render(); abrirPessoa(r.pessoa); toast('Excluído'); }
+  else if (a==='fatAbrir'){ abrirFatura(t.dataset.c); }
+  else if (a==='fatCheck'){ if (statusFatura(t.dataset.c, cur.y, cur.m)) abrirFatura(t.dataset.c); else pagarFatura(t.dataset.c); }
+  else if (a==='fatPagar'){ pagarFatura(t.dataset.c); }
+  else if (a==='fatParcialAbrir'){ document.getElementById('boxFatParcial').hidden = false; t.hidden = true; document.getElementById('fatPago').focus(); }
+  else if (a==='fatParcial'){ const v = parseValor(document.getElementById('fatPago').value); if (!(v > 0)) return toast('Digite quanto você pagou'); pagarFatura(t.dataset.c, v); }
+  else if (a==='fatDesfazer'){ desfazerFatura(t.dataset.c); }
   else if (a==='cobrar'){ cobrar(t.dataset.pessoaNome); }
   else if (a==='tgLancarRec'){ S.lancarRecebidos = S.lancarRecebidos === false; salvar(); t.classList.toggle('on', S.lancarRecebidos !== false); }
   else if (a==='meDevem'){ abrirPessoa(t.dataset.pessoaNome); }
