@@ -1,8 +1,18 @@
 {
   "rewrites": [
-    { "source": "/demo", "destination": "/index.html" }
+    {
+      "source": "/demo",
+      "destination": "/index.html"
+    }
   ],
   "crons": [
-    { "path": "/api/lembretes", "schedule": "0 23 * * *" }
+    {
+      "path": "/api/lembretes",
+      "schedule": "0 23 * * *"
+    },
+    {
+      "path": "/api/emails",
+      "schedule": "0 13 * * *"
+    }
   ]
 }
