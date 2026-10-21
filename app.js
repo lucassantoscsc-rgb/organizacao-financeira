@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 56;
+const APP_VERSAO = 57;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -432,7 +432,7 @@ function abrirPessoa(p){
   const pend = pendentes().filter(r=>r.pessoa===p), recebidos = (S.aReceber||[]).filter(r=>r.pessoa===p && r.recebido).slice(-10).reverse();
   abrir(`<h2>👤 ${esc(p)}</h2>
     ${pend.length ? `<p class="sim-txt">Te deve <b>${brl(soma(pend, r=>r.valor))}</b>.</p>
-    <div class="list flat">${pend.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">${fmtData(r.data)}${r.gastoId?' · gasto dividido':''}</div></div><div class="val num">${brl(r.valor)}</div><button class="btn sec mini" data-act="receber" data-ids="${r.id}">Recebi</button><button class="tirar-rec" data-act="excluirReceber" data-id="${r.id}" aria-label="Excluir">🗑️</button></div>`).join('')}</div>
+    <div class="list flat">${pend.map(r=>`<div class="item"><button class="tx" style="text-align:left" data-act="editarReceber" data-id="${r.id}"><div class="t1">${esc(r.desc)} <small class="muted">✏️</small></div><div class="t2">${fmtData(r.data)}${r.gastoId?' · gasto dividido':''}</div></button><div class="val num">${brl(r.valor)}</div><button class="btn sec mini" data-act="receber" data-ids="${r.id}">Recebi</button><button class="tirar-rec" data-act="excluirReceber" data-id="${r.id}" aria-label="Excluir">🗑️</button></div>`).join('')}</div>
     <div class="switch f" style="margin-top:12px"><span>Lançar como entrada ao receber</span><button type="button" class="tg ${S.lancarRecebidos!==false?'on':''}" data-act="tgLancarRec"></button></div>
     <div class="row2"><button class="btn pri" data-act="receber" data-ids="${pend.map(r=>r.id).join(',')}">Recebi tudo</button><button class="btn sec" data-act="cobrar" data-pessoa-nome="${esc(p)}">📲 Cobrar</button></div>
     <button class="btn sec" data-act="receberParteAbrir" style="margin-top:10px">Recebi uma parte</button>
@@ -465,28 +465,59 @@ function receberParte(p, valor){
   if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(valor*100)/100, data:hojeTxt, reembolso:true }); }
   salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(valor)} de ${p} ✓`);
 }
-function cobrar(p){
-  const pend = pendentes().filter(r=>r.pessoa===p), total = soma(pend, r=>r.valor);
+// Com mais de um item pendente, deixa escolher quais entram na mensagem de cobrança.
+function abrirCobrar(p){
+  const pend = pendentes().filter(r => r.pessoa === p);
+  if (pend.length < 2) return cobrar(p);
+  abrir(`<h2>📲 Cobrar ${esc(p)}</h2>
+    <p class="note" style="margin:-6px 0 12px">Marque o que vai entrar na mensagem.</p>
+    <div class="list flat">${pend.map(r => `<label class="item cobrar-item"><input type="checkbox" checked data-cobrar="${r.id}"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">${fmtData(r.data)}</div></div><div class="val num">${brl(r.valor)}</div></label>`).join('')}</div>
+    <p class="sim-txt" id="cobrarTotal" style="margin:12px 0"></p>
+    <button class="btn pri" data-act="cobrarEnviar" data-pessoa-nome="${esc(p)}">Enviar cobrança</button>
+    <button class="btn sec" data-act="voltarPessoa" data-pessoa-nome="${esc(p)}">Voltar</button>`);
+  totalCobrar();
+}
+function totalCobrar(){
+  const el = document.getElementById('cobrarTotal'); if (!el) return;
+  const ids = [...document.querySelectorAll('[data-cobrar]:checked')].map(c => c.dataset.cobrar);
+  el.innerHTML = ids.length ? `Total da cobrança: <b>${brl(soma((S.aReceber||[]).filter(r => ids.includes(r.id)), r => r.valor))}</b>` : 'Marque pelo menos um item.';
+}
+function cobrar(p, ids){
+  const pend = pendentes().filter(r=>r.pessoa===p && (!ids || ids.includes(r.id))), total = soma(pend, r=>r.valor);
+  if (!pend.length) return toast('Marque pelo menos um item');
   const itens = pend.map(r=>`• ${r.desc} (${fmtData(r.data)}): R$ ${r.valor.toLocaleString('pt-BR',{minimumFractionDigits:2})}`).join('\n');
   const msg = `Oi ${p}! Passando para lembrar ${pend.length>1?'destes valores':'deste valor'}:\n${itens}\nTotal: R$ ${total.toLocaleString('pt-BR',{minimumFractionDigits:2})}${S.chavePix?`\n\nMinha chave Pix: ${S.chavePix}`:''}\n\nObrigado! 😊`;
   if (navigator.share) navigator.share({ text: msg }).catch(()=>{});
   else navigator.clipboard.writeText(msg).then(()=>toast('Mensagem copiada. Cole no WhatsApp.')).catch(()=>toast('Não foi possível copiar.'));
 }
-function novoAReceber(){
-  form = { tipo:'aReceber', v:{ emprestei:true } };
+function novoAReceber(id){
+  const r = id ? (S.aReceber||[]).find(x => x.id === id) : null;
+  form = { tipo:'aReceber', id: r ? r.id : null, v:{ emprestei:!r } };
   const freq = pessoasFrequentes();
-  abrir(`<h2>🤝 Alguém me deve</h2>
-    <div class="f"><label>Quem?</label><input id="rPessoa" placeholder="Nome" autocomplete="off">${freq.length?`<div class="chips pessoas" style="margin-top:8px">${freq.map(x=>`<button type="button" data-setpessoa="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}</div>
-    <div class="f"><label>Quanto</label><input class="money num" id="rValor" inputmode="decimal" placeholder="0,00"></div>
-    <div class="row2"><div class="f"><label>Do quê?</label><input id="rDesc" placeholder="Ex.: Empréstimo, ingresso"></div>
-    <div class="f"><label>Data</label><input type="date" id="rData" value="${dataPadrao()}"></div></div>
-    <div class="switch f"><span>Emprestei dinheiro <small class="muted">(saiu do meu saldo agora)</small></span><button type="button" class="tg on" data-act="tgEmprestei"></button></div>
-    <button class="btn pri" data-act="salvarAReceber">Salvar</button>`);
+  abrir(`<h2>${r ? '✏️ Editar' : '🤝 Alguém me deve'}</h2>
+    <div class="f"><label>Quem?</label><input id="rPessoa" placeholder="Nome" autocomplete="off" value="${r ? esc(r.pessoa) : ''}">${freq.length?`<div class="chips pessoas" style="margin-top:8px">${freq.map(x=>`<button type="button" data-setpessoa="${esc(x)}">${esc(x)}</button>`).join('')}</div>`:''}</div>
+    <div class="f"><label>Quanto</label><input class="money num" id="rValor" inputmode="decimal" placeholder="0,00" value="${r ? moneyVal(r.valor) : ''}"></div>
+    <div class="row2"><div class="f"><label>Do quê?</label><input id="rDesc" placeholder="Ex.: Empréstimo, ingresso" value="${r ? esc(r.desc) : ''}"></div>
+    <div class="f"><label>Data</label><input type="date" id="rData" value="${r ? r.data || '' : dataPadrao()}"></div></div>
+    ${r ? '' : `<div class="switch f"><span>Emprestei dinheiro <small class="muted">(saiu do meu saldo agora)</small></span><button type="button" class="tg on" data-act="tgEmprestei"></button></div>`}
+    <button class="btn pri" data-act="salvarAReceber">${r ? 'Salvar alterações' : 'Salvar'}</button>
+    ${r ? `<button class="btn sec" data-act="voltarPessoa" data-pessoa-nome="${esc(r.pessoa)}">Voltar</button>` : ''}`);
 }
 function salvarAReceber(){
   const pessoa = nomesDe(document.getElementById('rPessoa').value)[0], valor = parseValor(document.getElementById('rValor').value);
   if (!pessoa) return toast('Quem te deve?'); if (!valor) return toast('Informe o valor');
   const desc = document.getElementById('rDesc').value.trim() || 'Empréstimo', data = document.getElementById('rData').value || dataHoje();
+  if (form.id){   // edição: atualiza a pendência e, se veio de "Emprestei dinheiro", o gasto ligado a ela
+    const r = S.aReceber.find(x => x.id === form.id); if (!r) return fechar();
+    Object.assign(r, { pessoa, desc, valor, data });
+    const Mg = r.gastoId && r.mk && S.meses[r.mk], g = Mg && Mg.gastos.find(x => x.id === r.gastoId);
+    if (g && g.minha === 0){
+      Object.assign(g, { valor, desc:`Emprestado para ${pessoa}`, data });
+      const nk = data.slice(0,7);
+      if (nk !== r.mk){ Mg.gastos.splice(Mg.gastos.indexOf(g), 1); const o = ymDe(nk); mes(o.y,o.m,true).gastos.push(g); r.mk = nk; }
+    }
+    salvar(); render(); abrirPessoa(pessoa); return toast('Alterado ✓');
+  }
   const r = { id:uid(), pessoa, desc, valor, data, recebido:false };
   if (form.v.emprestei){   // sai do saldo, mas não é gasto seu (sua parte = 0)
     const o = ymDe(data.slice(0,7)), M = mes(o.y,o.m,true), g = { id:uid(), cat:'❓ Outros', desc:`Emprestado para ${pessoa}`, valor, minha:0, forma:'Pix / Dinheiro', data, essencial:false, parcelas:1 };
@@ -3474,6 +3505,9 @@ document.addEventListener('click', e=>{
   else if (a==='divCatsTirar'){ form.v.partes.splice(+t.dataset.i, 1); if (!form.v.partes.length) form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
   else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
   else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
+  else if (a==='editarReceber'){ novoAReceber(t.dataset.id); }
+  else if (a==='voltarPessoa'){ abrirPessoa(t.dataset.pessoaNome); }
+  else if (a==='cobrarEnviar'){ cobrar(t.dataset.pessoaNome, [...document.querySelectorAll('[data-cobrar]:checked')].map(c => c.dataset.cobrar)); }
   else if (a==='receberParteAbrir'){ document.getElementById('boxRecParte').hidden = false; t.hidden = true; document.getElementById('recParte').focus(); }
   else if (a==='receberParte'){ receberParte(t.dataset.pessoaNome, parseValor(document.getElementById('recParte').value)); }
   else if (a==='excluirReceber'){ const r = (S.aReceber||[]).find(x => x.id === t.dataset.id); if (!r || !confirm(`Excluir "${r.desc}" (${brl(r.valor)}) de ${r.pessoa}?`)) return;
@@ -3486,7 +3520,7 @@ document.addEventListener('click', e=>{
   else if (a==='fatParcialAbrir'){ document.getElementById('boxFatParcial').hidden = false; t.hidden = true; document.getElementById('fatPago').focus(); }
   else if (a==='fatParcial'){ const v = parseValor(document.getElementById('fatPago').value); if (!(v > 0)) return toast('Digite quanto você pagou'); pagarFatura(t.dataset.c, v, (document.getElementById('fatData')||{}).value); }
   else if (a==='fatDesfazer'){ desfazerFatura(t.dataset.c); }
-  else if (a==='cobrar'){ cobrar(t.dataset.pessoaNome); }
+  else if (a==='cobrar'){ abrirCobrar(t.dataset.pessoaNome); }
   else if (a==='tgLancarRec'){ S.lancarRecebidos = S.lancarRecebidos === false; salvar(); t.classList.toggle('on', S.lancarRecebidos !== false); }
   else if (a==='meDevem'){ abrirPessoa(t.dataset.pessoaNome); }
   else if (a==='novaDivida'){ editarDivida(); }
@@ -3949,3 +3983,5 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 
 document.addEventListener('change', e => { if (e.target.dataset.partecat && form && form.v.partes){ form.v.partes[+e.target.dataset.partecat].cat = e.target.value; infoPartes(); } });
+
+document.addEventListener('change', e => { if (e.target.dataset && e.target.dataset.cobrar) totalCobrar(); });
