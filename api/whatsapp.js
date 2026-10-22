@@ -5,6 +5,8 @@
 //   "TINO-XXXX"           → liga este número à conta do Plus que gerou o código no app
 //   "gastei 45 no mercado" → a IA (Claude Haiku) entende o lançamento, ele vai para a conta no servidor
 //                            (tabela itens) e aparece no app pela sincronização; o Tino confirma a mensagem.
+//   foto ou PDF do comprovante → a mesma IA lê o comprovante e anota (a legenda, se houver, ajuda: "no crédito em 3x")
+//   "quanto posso gastar hoje?" → o Claude Opus responde com o resumo do mês que o app envia na sincronização
 const crypto = require('crypto');
 const AnthropicSdk = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicSdk.default || AnthropicSdk;
@@ -56,8 +58,23 @@ async function responder(para, texto) {
   }
 }
 
-// A IA lê a mensagem e devolve o lançamento em JSON (formato garantido pelo json_schema).
-async function interpretar(texto, categorias, cartoes) {
+// Baixa a foto ou o PDF que a pessoa mandou (a Meta dá um link temporário que exige o token).
+const MIDIAS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+async function baixarMidia(id) {
+  const auth = { Authorization: `Bearer ${tokenWa()}` };
+  const info = await fetch(`https://graph.facebook.com/v25.0/${id}`, { headers: auth }).then((r) => r.ok ? r.json() : null);
+  if (!info || !info.url) return null;
+  const tipo = String(info.mime_type || '').split(';')[0].trim();
+  if (!MIDIAS.includes(tipo) || +info.file_size > 4.5e6) return { tipo, grande: +info.file_size > 4.5e6 };
+  const r = await fetch(info.url, { headers: auth });
+  if (!r.ok) return null;
+  const buf = Buffer.from(await r.arrayBuffer());
+  return { tipo, dados: buf.toString('base64'), hash: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32) };
+}
+
+// A IA lê a mensagem (texto, ou foto/PDF do comprovante com a legenda) e devolve o lançamento em JSON
+// (formato garantido pelo json_schema).
+async function interpretar(texto, categorias, cartoes, midia) {
   const client = new Anthropic();
   const hoje = hojeBR();
   const r = await client.messages.create({
@@ -71,8 +88,14 @@ descricao: curta, com o lugar ou o que foi (ex.: "Mercado", "iFood", "Uber"), se
 categoria (só para gasto): a que melhor combina, escolhida da lista. Na dúvida, "❓ Outros".
 forma: "Crédito" se falar cartão de crédito/no crédito/parcelado; "Débito" se falar débito; senão "Pix / Dinheiro".
 parcelas: número de vezes se for parcelado ("em 3x" → 3); senão 1.
-cartao: o nome do cartão citado, se for um destes: ${cartoes.length ? cartoes.join(', ') : '(nenhum cadastrado)'}; senão "".`,
-    messages: [{ role: 'user', content: texto }],
+cartao: o nome do cartão citado, se for um destes: ${cartoes.length ? cartoes.join(', ') : '(nenhum cadastrado)'}; senão "".
+Se vier uma foto ou PDF: é um comprovante (Pix, nota fiscal, cupom, recibo, maquininha). Use o VALOR TOTAL pago, o estabelecimento ou quem recebeu como descricao, e a data do comprovante.
+Comprovante de Pix ou transferência RECEBIDA (a pessoa é quem recebeu) é "entrada". Pix enviado ou pagamento é "gasto" com forma "Pix / Dinheiro", salvo se o comprovante ou a legenda indicar crédito ou débito.
+A legenda que acompanha a foto vale mais que a foto (ex.: "no crédito em 3x"). Se a imagem não for um comprovante ou não der para ler o valor, tipo "outro".`,
+    messages: [{ role: 'user', content: midia ? [
+      { type: midia.tipo === 'application/pdf' ? 'document' : 'image', source: { type: 'base64', media_type: midia.tipo, data: midia.dados } },
+      { type: 'text', text: texto || '(foto do comprovante, sem legenda)' },
+    ] : texto }],
     output_config: {
       effort: 'low',
       format: {
@@ -113,11 +136,14 @@ async function contexto(sql, email) {
   return { extras, cartoes, ultimo };
 }
 
-async function lancar(sql, conta, texto) {
+async function lancar(sql, conta, texto, midia) {
   const { extras, cartoes, ultimo } = await contexto(sql, conta.email);
   const categorias = CATEGORIAS.concat(extras.map((x) => x.c));
-  const it = await interpretar(texto, categorias, cartoes.map((c) => c.nome));
-  if (it && it.tipo === 'pergunta') return responderPergunta(sql, conta, texto);
+  const it = await interpretar(texto, categorias, cartoes.map((c) => c.nome), midia);
+  if (it && it.tipo === 'pergunta' && !midia) return responderPergunta(sql, conta, texto);
+  if (midia && (!it || it.tipo === 'outro' || it.tipo === 'pergunta' || !(it.valor > 0))) {
+    return 'Não consegui ler o valor nesse comprovante 🤔 Tente uma foto mais nítida, com o valor aparecendo, ou me escreva: "gastei 45 no mercado no pix".';
+  }
   if (!it || it.tipo === 'outro' || !(it.valor > 0)) {
     return 'Não entendi 🤔 Você pode me mandar um gasto ou uma pergunta:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• "quanto posso gastar hoje?"\n• "quanto gastei com mercado esse mês?"';
   }
@@ -184,7 +210,9 @@ ${JSON.stringify({ gastos, entradas })}`,
 }
 
 async function tratar(sql, msg) {
-  const de = String(msg.from || ''), texto = msg.type === 'text' ? String(msg.text && msg.text.body || '').trim() : '';
+  const de = String(msg.from || '');
+  const arquivo = msg.type === 'image' ? msg.image : msg.type === 'document' ? msg.document : null;
+  const texto = String(msg.type === 'text' ? (msg.text && msg.text.body) || '' : (arquivo && arquivo.caption) || '').trim();
   // mensagem repetida (a Meta reenvia se demorarmos): trata uma vez só
   if (!(await redis('SET', 'wa:msg:' + msg.id, '1', 'NX', 'EX', 86400))) return;
 
@@ -194,15 +222,26 @@ async function tratar(sql, msg) {
     if (!c) return responder(de, 'Esse código expirou ou não existe. Gere outro no app: Ajustes → Tino Plus → Conectar WhatsApp.');
     await sql`UPDATE contas SET whatsapp = NULL WHERE whatsapp = ${de}`;
     await sql`UPDATE contas SET whatsapp = ${de} WHERE email = ${c.email}`;
-    return responder(de, `Pronto! Seu WhatsApp está conectado ao Tino ✅\n\nAgora é só me mandar seus gastos, do seu jeito:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"`);
+    return responder(de, `Pronto! Seu WhatsApp está conectado ao Tino ✅\n\nAgora é só me mandar seus gastos, do seu jeito:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• 📸 uma foto do comprovante\n\nE pode perguntar: "quanto posso gastar hoje?"`);
   }
 
   const [conta] = await sql`SELECT * FROM contas WHERE whatsapp = ${de}`;
   if (!conta) return responder(de, 'Oi! Eu sou o Tino 💚 Para anotar seus gastos por aqui, conecte este WhatsApp no app: Ajustes → Tino Plus → Conectar WhatsApp.');
   if (!TESTE && !plusAtivo(conta)) return responder(de, 'O Tino no WhatsApp é um recurso do Tino Plus. Veja em Ajustes → Tino Plus no app.');
-  if (!texto) return responder(de, 'Por enquanto eu entendo só mensagens de texto 🙂 Ex.: "gastei 45 no mercado no pix".');
+  if (!texto && !arquivo) return responder(de, 'Por enquanto eu entendo texto e foto do comprovante 🙂 Ex.: "gastei 45 no mercado no pix".');
   if (!(await limite(de))) return responder(de, 'Muitas mensagens em pouco tempo. Espere um pouquinho e tente de novo 🙏');
-  return responder(de, await lancar(sql, conta, texto.slice(0, 500)));
+  if (!arquivo) return responder(de, await lancar(sql, conta, texto.slice(0, 500)));
+
+  const midia = await baixarMidia(arquivo.id);
+  if (!midia) return responder(de, 'Não consegui abrir esse arquivo 😕 Tente mandar a foto de novo.');
+  if (!midia.dados) return responder(de, midia.grande ? 'Esse arquivo é grande demais 😅 Mande uma foto do comprovante.' : 'Eu leio fotos (JPG/PNG) e PDF de comprovantes 🙂 Mande a foto do comprovante.');
+  // o mesmo comprovante enviado duas vezes não vira dois lançamentos
+  if (!(await redis('SET', 'wa:comp:' + conta.email + ':' + midia.hash, '1', 'NX', 'EX', 90 * 86400)))
+    return responder(de, 'Esse comprovante já foi anotado antes 😉 Se quiser lançar de novo, escreva o gasto por texto.');
+  let r = '';
+  try { r = await lancar(sql, conta, texto.slice(0, 500), midia); }
+  finally { if (!r.startsWith('✅')) await redis('DEL', 'wa:comp:' + conta.email + ':' + midia.hash); }   // não anotou: pode tentar de novo
+  return responder(de, r);
 }
 async function limite(de) {
   const k = 'wa:lim:' + de, n = await redis('INCR', k);
