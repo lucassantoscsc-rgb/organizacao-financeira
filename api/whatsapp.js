@@ -74,6 +74,9 @@ async function baixarMidia(id, tipos = MIDIAS, max = 4.5e6) {
   return { tipo, buf, dados: buf.toString('base64'), hash: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32) };
 }
 
+// Impressão digital da chave (6 letras do hash + tamanho): mostra QUAL chave está na Vercel sem revelar a chave.
+const impressaoChave = () => { const k = String(process.env.ELEVENLABS_API_KEY || '').trim();
+  return crypto.createHash('sha256').update(k).digest('hex').slice(0, 6) + ' tam ' + k.length; };
 // Áudio → texto (ElevenLabs Speech to Text, em português).
 async function transcrever(audio) {
   const form = new FormData();
@@ -260,7 +263,7 @@ async function tratar(sql, msg) {
     if (!audio.buf) return responder(de, audio.grande ? 'Esse áudio é longo demais 😅 Mande um áudio curto, de até 1 minuto, ou escreva.' : 'Não consegui ouvir esse áudio 😕 Tente gravar de novo.');
     const t = await transcrever(audio), ouvido = t.texto;
     // no endereço de teste, mostra o motivo da falha (sem segredos) para facilitar o diagnóstico
-    if (!ouvido) return responder(de, 'Não consegui entender o áudio 😕 Tente de novo, falando o valor e o que foi, ou escreva.' + (TESTE ? `\n\n(teste: ${t.erro || 'áudio vazio'} · ${audio.tipo} · ${audio.buf.length} bytes)` : ''));
+    if (!ouvido) return responder(de, 'Não consegui entender o áudio 😕 Tente de novo, falando o valor e o que foi, ou escreva.' + (TESTE ? `\n\n(teste: ${t.erro || 'áudio vazio'} · ${audio.tipo} · ${audio.buf.length} bytes · chave ${impressaoChave()})` : ''));
     return responder(de, `🎤 Entendi: "${ouvido.slice(0, 300)}"\n\n` + await lancar(sql, conta, ouvido.slice(0, 500)));
   }
   if (!texto && !arquivo) return responder(de, 'Por enquanto eu entendo texto, áudio e foto do comprovante 🙂 Ex.: "gastei 45 no mercado no pix".');
