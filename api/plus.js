@@ -36,7 +36,8 @@ async function enviarCodigo(email, codigo) {
 }
 
 const contaPublica = (c) => ({ email: c.email, plano: c.plano, plusAte: c.plus_ate, fundador: c.fundador, whatsapp: !!c.whatsapp, convidado: !!c.convidado,
-  plusAtivo: plusAtivo(c) });
+  plusAtivo: plusAtivo(c), teste: process.env.VERCEL_ENV !== 'production',
+  assinatura: c.assinatura ? { status: c.assinatura.status, evento: c.assinatura.evento, proxima: c.assinatura.proxima, valor: c.assinatura.valor } : null });
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });

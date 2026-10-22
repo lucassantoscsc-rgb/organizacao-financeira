@@ -99,6 +99,11 @@ main{max-width:760px}
       <div id="lista"></div>
     </div>
     <div class="card">
+      <h2>⭐ Tino Plus: assinantes</h2>
+      <div class="kpis" id="plStats"></div>
+      <div id="plAssinantes"></div>
+    </div>
+    <div class="card">
       <h2>⭐ Tino Plus: convidados <span style="font-weight:400;color:var(--muted)">(teste antes do lançamento)</span></h2>
       <form class="ads-form" onsubmit="plusConvidar(event)">
         <div style="flex:1;min-width:220px"><label for="plEmail">E-mail do cliente (o mesmo da compra)</label><input id="plEmail" type="email" placeholder="cliente@email.com" style="width:100%"></div>
@@ -150,6 +155,16 @@ async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(
 /* Tino Plus: quem foi convidado, se já entrou (sessões) e se já sincronizou (itens no servidor). */
 async function carregarPlus(){
   let d; try { d = await api({ acao:'plusLista' }); } catch(e){ return; }
+  const ativo = (x) => x.plus_ate && new Date(x.plus_ate) > new Date();
+  const ativos = d.assinantes.filter(ativo), mrr = ativos.filter(x => x.assinatura.status !== 'canceled').reduce((t,x) => t + (+x.assinatura.valor || 0), 0);
+  const st = (x) => !ativo(x) ? '<span class="tag no">encerrada</span>' : x.assinatura.status === 'canceled' ? '<span class="tag l">cancelada (até o fim do período)</span>'
+    : /late|refused/.test(x.assinatura.evento || '') ? '<span class="tag no">pagamento atrasado</span>' : '<span class="tag ok">ativa</span>';
+  document.getElementById('plStats').innerHTML = [['Assinantes ativos', ativos.length], ['Receita mensal', 'R$ ' + mrr.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})],
+    ['Novas no mês', d.doMes.novas], ['Cancelamentos no mês', d.doMes.canceladas], ['Atrasos no mês', d.doMes.atrasadas], ['Reembolsos no mês', d.doMes.reembolsos]]
+    .map(([t,v]) => `<div class="kpi"><span>${t}</span><b>${v}</b></div>`).join('');
+  document.getElementById('plAssinantes').innerHTML = d.assinantes.length ? d.assinantes.map(x => `<div class="item"><span class="c">${esc(x.email)}</span> ${st(x)}${x.fundador ? ' <span class="tag u">fundador</span>' : ''}
+      <span class="n">${x.assinatura.valor ? 'R$ ' + (+x.assinatura.valor).toLocaleString('pt-BR',{minimumFractionDigits:2}) + '/mês · ' : ''}Plus até ${x.plus_ate ? new Date(x.plus_ate).toLocaleDateString('pt-BR') : '—'} · último evento: ${esc(x.assinatura.evento)} em ${data(x.assinatura.em)}</span></div>`).join('')
+    : '<p class="aviso" style="margin-top:6px">Nenhum assinante ainda.</p>';
   const el = document.getElementById('plLista');
   el.innerHTML = d.lista.length ? d.lista.map(x => `<div class="item"><span class="c">${esc(x.email)}</span>
       ${+x.itens ? '<span class="tag ok">sincronizando</span>' : +x.sessoes ? '<span class="tag l">entrou</span>' : '<span class="tag no">ainda não entrou</span>'}${x.fundador ? ' <span class="tag u">fundador</span>' : ''}

@@ -1,13 +1,16 @@
 // Webhook da Cakto: cadastra o e-mail de quem comprou e remove em reembolso/chargeback.
+// Eventos do Tino Plus (produto de assinatura) vão para api/_assinatura.js. O Plus tem um webhook próprio na Cakto,
+// com outro secret (CAKTO_PLUS_SECRET), apontando para esta mesma URL.
 // Configure na Cakto a URL https://SEU-LINK/api/cakto e copie o "secret" para a
 // variável CAKTO_SECRET na Vercel.
 const crypto = require('crypto');
 const { redis, normalizar } = require('./_db');
 const indique = require('./indique');
 const emails = require('./_emails');
+const { processarAssinatura, ehAssinatura } = require('./_assinatura');
 
-function secretOk(recebido) {
-  const certo = Buffer.from(process.env.CAKTO_SECRET || '');
+function secretOk(recebido, segredo = process.env.CAKTO_SECRET) {
+  const certo = Buffer.from(segredo || '');
   const veio = Buffer.from(String(recebido || ''));
   return certo.length > 0 && certo.length === veio.length && crypto.timingSafeEqual(certo, veio);
 }
@@ -28,7 +31,9 @@ async function registrar(tipo, dados) {
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
   const corpo = req.body || {};
-  if (!secretOk(corpo.secret)) return res.status(401).json({ ok: false });
+  // O Plus tem um webhook próprio na Cakto (CAKTO_PLUS_SECRET), que só pode mexer em assinaturas.
+  const doPlus = secretOk(corpo.secret, process.env.CAKTO_PLUS_SECRET);
+  if (!doPlus && !secretOk(corpo.secret)) return res.status(401).json({ ok: false });
 
   const dados = corpo.data || {};
   const cliente = dados.customer || {};
@@ -36,6 +41,12 @@ module.exports = async (req, res) => {
   if (!email.includes('@')) return res.status(200).json({ ok: true, ignorado: 'sem e-mail' });
 
   try {
+    // Tino Plus (produto de assinatura): tratado à parte, sem tocar no acesso vitalício
+    if (doPlus && !ehAssinatura(corpo.event, dados)) return res.status(200).json({ ok: true, ignorado: 'webhook do Plus só trata assinaturas' });
+    if (ehAssinatura(corpo.event, dados)) {
+      await processarAssinatura(corpo.event, dados, email);
+      return res.status(200).json({ ok: true, plus: true });
+    }
     if (corpo.event === 'purchase_approved') {
       await redis('HSET', 'codigos', email, JSON.stringify({
         nota: `${cliente.name || ''} · Cakto ${dados.refId || dados.id || ''}`.trim(),

@@ -72,7 +72,14 @@ module.exports = async (req, res) => {
           (SELECT count(*) FROM itens i WHERE i.email = c.email AND NOT i.apagado) AS itens,
           (SELECT max(i.alterado) FROM itens i WHERE i.email = c.email) AS ultima
         FROM contas c WHERE c.convidado ORDER BY c.convite_em DESC`;
-      return res.json({ ok: true, lista });
+      // Assinantes (pagantes): ativos, receita mensal e cancelamentos/atrasos
+      const assinantes = await sql`SELECT email, plus_ate, fundador, assinatura FROM contas WHERE assinatura IS NOT NULL ORDER BY (assinatura->>'em') DESC`;
+      const mes = new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 7), soma = async (k) => {
+        const h = (await redis('HGETALL', 'met:plus:' + k)) || []; let n = 0;
+        for (let i = 0; i < h.length; i += 2) if (h[i].startsWith(mes)) n += +h[i + 1] || 0;
+        return n; };
+      const doMes = { novas: await soma('nova'), canceladas: await soma('cancelada'), atrasadas: await soma('atrasada'), reembolsos: await soma('reembolso') };
+      return res.json({ ok: true, lista, assinantes, doMes });
     }
     if (acao === 'emailTeste') {
       // Manda um dos e-mails automáticos para o endereço digitado (para conferir como chega).

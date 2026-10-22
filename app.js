@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 64;
+const APP_VERSAO = 65;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -82,6 +82,8 @@ const TESTE = /-lucas-santos-projects4\.vercel\.app$/.test(location.hostname) ||
 if (TESTE && !DEMO) CONFIG.exigirCodigo = false;
 // Página de vendas do app (tinofinancas.com.br leva para /app; o domínio antigo continua funcionando).
 const LINK_COMPRA = 'https://www.tinofinancas.com.br';
+// Checkout da assinatura do Tino Plus na Cakto (preço normal e preço de fundador, para quem tem o vitalício)
+const LINK_PLUS = '', LINK_PLUS_FUNDADOR = '';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
@@ -1532,10 +1534,31 @@ async function abrirPlus(){
     <p class="note" style="margin:-4px 0 14px">Conectado como <b>${esc(c.email)}</b>.</p>
     <div class="ind-cod"><small>Seu plano</small><b style="letter-spacing:0">${c.plusAtivo ? (c.convidado ? 'Plus (teste)' : 'Plus ativo') : 'Gratuito'}</b>${c.plusAtivo && c.plusAte ? `<small style="margin-top:4px">até ${new Date(c.plusAte).toLocaleDateString('pt-BR')}</small>` : ''}</div>
     ${c.convidado ? '<p class="note" style="text-align:center;margin:0 0 14px">Obrigado por testar! Conte o que achou pelo e-mail de suporte (Ajustes → Ajuda).</p>' : ''}
-    ${c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : ''}
-    ${blocoSync()}
-    ${blocoWhatsApp(c)}
+    ${blocoAssinatura(c)}
+    ${c.plusAtivo || c.teste ? blocoSync() + blocoWhatsApp(c) : ''}
     <button class="btn sec" data-act="plusSair">Sair do Plus neste aparelho</button>`);
+}
+// Assinatura: quem não tem o Plus vê o que ganha e o botão da Cakto; quem assina vê a renovação e como cancelar.
+function blocoAssinatura(c){
+  const dt = (d) => d ? new Date(d).toLocaleDateString('pt-BR') : '', a = c.assinatura;
+  const cancelar = `mailto:${CONFIG.suporteEmail}?subject=${encodeURIComponent('Cancelar Tino Plus')}&body=${encodeURIComponent('Quero cancelar a assinatura do Tino Plus da conta ' + c.email + '.')}`;
+  if (c.plusAtivo && a && !c.convidado){
+    const st = a.status === 'canceled' ? `Assinatura cancelada. O Plus continua até <b>${dt(c.plusAte)}</b>.`
+      : /late|refused/.test(a.evento || a.status || '') || a.status === 'late' ? `⚠️ Não conseguimos cobrar a renovação. Atualize o pagamento pelo e-mail da Cakto até <b>${dt(c.plusAte)}</b> para não perder o Plus.`
+      : `Renova em <b>${dt(a.proxima)}</b>${a.valor ? ` · ${brl(a.valor)}/mês` : ''}.`;
+    return `<p class="note" style="text-align:center;margin:0 0 14px">${st}</p>
+      ${a.status === 'canceled' ? '' : `<p class="note" style="text-align:center;margin:-6px 0 14px"><a href="${cancelar}" style="color:inherit">Cancelar assinatura</a></p>`}`;
+  }
+  if (c.plusAtivo) return c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : '';
+  const link = c.fundador ? LINK_PLUS_FUNDADOR : LINK_PLUS;
+  return `<h3 style="margin:4px 0 8px">O que você ganha com o Plus</h3>
+    <p class="note" style="margin:0 0 8px">🔄 <b>Seus dados em todos os aparelhos</b>, salvos no servidor. Trocou de celular, nada se perde.</p>
+    <p class="note" style="margin:0 0 8px">💬 <b>Tino no WhatsApp:</b> anote gastos por texto, foto do comprovante ou áudio, e pergunte "quanto posso gastar hoje?".</p>
+    <p class="note" style="margin:0 0 14px">🔔 <b>Lembretes no WhatsApp</b> das contas e da fatura do cartão, e o resumo da sua semana.</p>
+    <div class="ind-cod"><small>${c.fundador ? '🌟 Preço de fundador, para sempre' : 'Assinatura mensal'}</small><b style="letter-spacing:0">${c.fundador ? 'R$ 9,90' : 'R$ 14,90'}<span style="font-size:.5em">/mês</span></b><small style="margin-top:4px">Cancele quando quiser</small></div>
+    ${link ? `<a class="btn pri" href="${link}" target="_blank" rel="noopener">⭐ Assinar o Tino Plus</a>
+      <p class="note" style="margin:10px 0 12px">Na compra, use o e-mail <b>${esc(c.email)}</b>. Depois de pagar, volte aqui e toque em "Já assinei".</p>
+      <button class="btn sec" data-act="plus">Já assinei</button>` : '<p class="note" style="text-align:center;margin:0 0 14px">A assinatura abre em breve.</p>'}`;
 }
 // Tino no WhatsApp: o app gera um código, o cliente manda para o número do Tino e pronto.
 function blocoWhatsApp(c){
