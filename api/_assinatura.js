@@ -20,6 +20,8 @@ async function processarAssinatura(evento, dados, email) {
 
   if (ATIVAM.includes(evento)) {
     const prox = Date.parse(sub.next_payment_date || '');
+    // a "compra aprovada" não traz a data da próxima cobrança: estima um mês (o evento da assinatura corrige)
+    if (!info.proxima) info.proxima = new Date((prox > Date.now() ? prox : Date.now() + 30 * 864e5)).toISOString();
     const ate = new Date((prox > Date.now() ? prox : Date.now() + 30 * 864e5) + FOLGA).toISOString();
     const [antes] = await sql`SELECT assinatura FROM contas WHERE email = ${email}`;
     await sql`INSERT INTO contas (email, plano, plus_ate, fundador, assinatura) VALUES (${email}, 'plus', ${ate}, ${jaFundador}, ${JSON.stringify(info)}::jsonb)

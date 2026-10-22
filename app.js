@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 66;
+const APP_VERSAO = 67;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1545,7 +1545,7 @@ function blocoAssinatura(c){
   if (c.plusAtivo && a && !c.convidado){
     const st = a.status === 'canceled' ? `Assinatura cancelada. O Plus continua até <b>${dt(c.plusAte)}</b>.`
       : /late|refused/.test(a.evento || a.status || '') || a.status === 'late' ? `⚠️ Não conseguimos cobrar a renovação. Atualize o pagamento pelo e-mail da Cakto até <b>${dt(c.plusAte)}</b> para não perder o Plus.`
-      : `Renova em <b>${dt(a.proxima)}</b>${a.valor ? ` · ${brl(a.valor)}/mês` : ''}.`;
+      : `${a.proxima ? `Renova em <b>${dt(a.proxima)}</b>` : 'Renova todo mês'}${a.valor ? ` · ${brl(a.valor)}/mês` : ''}.`;
     return `<p class="note" style="text-align:center;margin:0 0 14px">${st}</p>
       ${a.status === 'canceled' ? '' : `<p class="note" style="text-align:center;margin:-6px 0 14px"><a href="${cancelar}" style="color:inherit">Cancelar assinatura</a></p>`}`;
   }
