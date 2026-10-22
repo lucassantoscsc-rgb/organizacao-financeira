@@ -80,12 +80,18 @@ async function transcrever(audio) {
   form.append('model_id', process.env.ELEVENLABS_STT_MODELO || 'scribe_v1');
   form.append('language_code', 'por');
   form.append('tag_audio_events', 'false');
-  form.append('file', new Blob([audio.buf], { type: audio.tipo }), 'audio');
+  const ext = { 'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/aac': 'aac', 'audio/amr': 'amr' }[audio.tipo] || 'ogg';
+  form.append('file', new Blob([audio.buf], { type: audio.tipo }), 'audio.' + ext);
   const r = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
     method: 'POST', headers: { 'xi-api-key': String(process.env.ELEVENLABS_API_KEY || '').trim() }, body: form,
   });
-  if (!r.ok) { console.error('whatsapp transcrição', r.status, (await r.text()).slice(0, 300)); return null; }
-  return String((await r.json()).text || '').trim();
+  if (!r.ok) {
+    const corpo = (await r.text()).slice(0, 300);
+    console.error('whatsapp transcrição', r.status, corpo);
+    let motivo = ''; try { const d = JSON.parse(corpo).detail || {}; motivo = d.status || d.code || ''; } catch (e) {}
+    return { erro: `${r.status} ${motivo}`.trim() };
+  }
+  return { texto: String((await r.json()).text || '').trim() };
 }
 
 // A IA lê a mensagem (texto, ou foto/PDF do comprovante com a legenda) e devolve o lançamento em JSON
@@ -252,8 +258,9 @@ async function tratar(sql, msg) {
     const audio = await baixarMidia(msg.audio.id, AUDIOS, 400e3);
     if (!audio) return responder(de, 'Não consegui abrir esse áudio 😕 Tente mandar de novo.');
     if (!audio.buf) return responder(de, audio.grande ? 'Esse áudio é longo demais 😅 Mande um áudio curto, de até 1 minuto, ou escreva.' : 'Não consegui ouvir esse áudio 😕 Tente gravar de novo.');
-    const ouvido = await transcrever(audio);
-    if (!ouvido) return responder(de, 'Não consegui entender o áudio 😕 Tente de novo, falando o valor e o que foi, ou escreva.');
+    const t = await transcrever(audio), ouvido = t.texto;
+    // no endereço de teste, mostra o motivo da falha (sem segredos) para facilitar o diagnóstico
+    if (!ouvido) return responder(de, 'Não consegui entender o áudio 😕 Tente de novo, falando o valor e o que foi, ou escreva.' + (TESTE ? `\n\n(teste: ${t.erro || 'áudio vazio'} · ${audio.tipo} · ${audio.buf.length} bytes)` : ''));
     return responder(de, `🎤 Entendi: "${ouvido.slice(0, 300)}"\n\n` + await lancar(sql, conta, ouvido.slice(0, 500)));
   }
   if (!texto && !arquivo) return responder(de, 'Por enquanto eu entendo texto, áudio e foto do comprovante 🙂 Ex.: "gastei 45 no mercado no pix".');
