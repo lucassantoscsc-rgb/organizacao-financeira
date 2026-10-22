@@ -13,7 +13,8 @@ const { banco, plusAtivo } = require('./_pg');
 
 const TESTE = process.env.VERCEL_ENV !== 'production';
 const PHONE_ID = process.env.WHATSAPP_PHONE_ID || '1457233977454720';   // número de teste da Meta, até termos o oficial
-const MODELO = 'claude-haiku-5-5';
+const MODELO = 'claude-haiku-5-5';        // entende a mensagem e anota (rápido e barato)
+const MODELO_PERGUNTAS = 'claude-opus-5-5'; // responde perguntas abertas sobre o dinheiro da pessoa
 const CATEGORIAS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','🍗 Alimentação','⛽ Gasolina','🚗 Transporte','🏠 Casa','💊 Saúde',
   '📦 Compras Online','👕 Vestuário','🎉 Lazer','📚 Educação','📱 Assinaturas','💄 Beleza','🐾 Pets','🎁 Presentes','❓ Outros'];
 const ESSENCIAIS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','⛽ Gasolina','🚗 Transporte','🏠 Casa','💊 Saúde','📚 Educação'];
@@ -64,7 +65,7 @@ async function interpretar(texto, categorias, cartoes) {
     max_tokens: 2000,
     system: `Você lê mensagens de WhatsApp de um app de finanças pessoais brasileiro e extrai UM lançamento.
 Hoje é ${hoje}. "ontem", "sexta" etc. são relativos a hoje. Sem data na mensagem, use hoje.
-tipo: "gasto" (comprou, pagou, gastei), "entrada" (recebi, caiu salário, me pagaram) ou "outro" (não é um lançamento: saudação, pergunta, dúvida).
+tipo: "gasto" (comprou, pagou, gastei), "entrada" (recebi, caiu salário, me pagaram), "pergunta" (quer saber algo sobre o próprio dinheiro: quanto pode gastar, quanto gastou, se dá pra comprar algo, como está o mês) ou "outro" (saudação, agradecimento, assunto que não é dinheiro).
 valor: número em reais (ex.: "45", "45,90", "R$ 1.200" → 1200). Se não houver valor, tipo "outro".
 descricao: curta, com o lugar ou o que foi (ex.: "Mercado", "iFood", "Uber"), sem o valor.
 categoria (só para gasto): a que melhor combina, escolhida da lista. Na dúvida, "❓ Outros".
@@ -79,7 +80,7 @@ cartao: o nome do cartão citado, se for um destes: ${cartoes.length ? cartoes.j
         schema: {
           type: 'object',
           properties: {
-            tipo: { type: 'string', enum: ['gasto', 'entrada', 'outro'] },
+            tipo: { type: 'string', enum: ['gasto', 'entrada', 'pergunta', 'outro'] },
             valor: { type: 'number' },
             descricao: { type: 'string' },
             categoria: { type: 'string', enum: categorias },
@@ -116,8 +117,9 @@ async function lancar(sql, conta, texto) {
   const { extras, cartoes, ultimo } = await contexto(sql, conta.email);
   const categorias = CATEGORIAS.concat(extras.map((x) => x.c));
   const it = await interpretar(texto, categorias, cartoes.map((c) => c.nome));
+  if (it && it.tipo === 'pergunta') return responderPergunta(sql, conta, texto);
   if (!it || it.tipo === 'outro' || !(it.valor > 0)) {
-    return 'Não entendi como um lançamento 🤔\nMe mande assim:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"';
+    return 'Não entendi 🤔 Você pode me mandar um gasto ou uma pergunta:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• "quanto posso gastar hoje?"\n• "quanto gastei com mercado esse mês?"';
   }
   const data = /^\d{4}-\d{2}-\d{2}$/.test(it.data) && it.data <= hojeBR() ? it.data : hojeBR();
   const mk = data.slice(0, 7), id = uid(), valor = Math.round(it.valor * 100) / 100;
@@ -140,6 +142,45 @@ async function lancar(sql, conta, texto) {
     VALUES (${conta.email}, ${chave}, ${JSON.stringify(item)}::jsonb, false, nextval('itens_seq'), 'whatsapp', now())`;
   const quando = data === hojeBR() ? 'hoje' : data.split('-').reverse().slice(0, 2).join('/');
   return `${resumo}\n📅 ${quando}\n\nJá vai aparecer no app. Errou? É só corrigir por lá.`;
+}
+
+// Perguntas: o Claude Opus responde com o resumo do mês que o app envia na sincronização (os mesmos números da tela
+// inicial) e os lançamentos do mês. Ele só usa esses dados; se o resumo for antigo, avisa de quando ele é.
+async function responderPergunta(sql, conta, texto) {
+  const mk = hojeBR().slice(0, 7);
+  const [res] = await sql`SELECT valor, alterado FROM itens WHERE email = ${conta.email} AND chave = 'v|resumoPlus' AND NOT apagado`;
+  if (!res || !res.valor) return 'Ainda não tenho o resumo do seu mês 🙂 Abra o Tino no celular (com a sincronização ligada) e me pergunte de novo.';
+  const lanc = await sql`SELECT chave, valor FROM itens WHERE email = ${conta.email} AND NOT apagado
+    AND (chave LIKE ${'i|m/' + mk + '/gastos|%'} OR chave LIKE ${'i|m/' + mk + '/entradas|%'}) ORDER BY alterado DESC LIMIT 200`;
+  const gastos = lanc.filter((l) => l.chave.includes('/gastos|')).map((l) => ({ data: l.valor.data, desc: l.valor.desc, categoria: l.valor.cat, valor: l.valor.valor, forma: l.valor.forma, parcelas: l.valor.parcelas }));
+  const entradas = lanc.filter((l) => l.chave.includes('/entradas|')).map((l) => ({ data: l.valor.data, nome: l.valor.nome, valor: l.valor.valor }));
+  const resumo = res.valor, idadeH = (Date.now() - new Date(resumo.em || res.alterado).getTime()) / 36e5;
+  const client = new Anthropic();
+  const r = await client.beta.messages.create({
+    model: MODELO_PERGUNTAS,
+    max_tokens: 4000,
+    betas: ['server-side-fallback-2026-07-01'],
+    fallbacks: 'default',
+    output_config: { effort: 'low' },
+    system: `Você é o Tino, assistente do app de finanças pessoais Tino Finanças, respondendo pelo WhatsApp em português do Brasil.
+Responda a pergunta usando SOMENTE os dados abaixo. Seja curto (no máximo 5 linhas), direto e gentil, com valores em reais (R$ 1.234,56).
+Pode usar 1 ou 2 emojis. Sem markdown com # ou tabelas; *negrito* do WhatsApp é permitido.
+"podeGastarHoje" é o valor que a pessoa pode gastar hoje (o principal número do app). "sobramParaOMes" é o que sobra para os dias restantes.
+Se a resposta não estiver nos dados, diga que não tem essa informação e sugira ver no app. Não invente números.
+Não dê recomendação de investimento (ações, cripto, fundos); para isso, diga que não é a sua função.
+${idadeH > 6 ? `Os dados são de quando o app sincronizou pela última vez (${new Date(resumo.em).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })}); avise isso numa frase curta.` : ''}
+Hoje é ${hojeBR()}.
+
+Resumo do mês (calculado pelo app):
+${JSON.stringify(resumo)}
+
+Lançamentos deste mês (mais recentes primeiro):
+${JSON.stringify({ gastos, entradas })}`,
+    messages: [{ role: 'user', content: texto }],
+  });
+  if (r.stop_reason === 'refusal') return 'Não consigo responder isso por aqui 🙏 Veja os detalhes no app.';
+  const t = r.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
+  return t || 'Não consegui responder agora. Tente de novo em instantes 🙏';
 }
 
 async function tratar(sql, msg) {

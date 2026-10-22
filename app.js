@@ -1659,6 +1659,21 @@ function agendarSync(ms){
 }
 const apiSync = (dados) => plusApi(dados, 'sync').then(d => { if (d.status === 401){ plusGuardar(null); throw new Error('sessao'); } if (!d.ok) throw new Error(d.erro || 'falha'); return d; });
 
+// Resumo do mês atual para o Tino responder perguntas no WhatsApp com os mesmos números da tela inicial.
+// Vai na sincronização como mais um valor (v|resumoPlus).
+function resumoParaPlus(){
+  const y = hoje.getFullYear(), m = hoje.getMonth(), C = calc(y,m), D = diasNoMes(y,m), d = hoje.getDate(), rest = D - d + 1;
+  const livre = C.restante - C.contasPend, r2 = (v) => Math.round((+v || 0) * 100) / 100;
+  const cats = {}; Object.entries(C.cats).filter(([,v]) => v > 0).sort((a,b) => b[1]-a[1]).forEach(([c,v]) => cats[c] = r2(v));
+  const p = prevYM(y,m), P = temDados(S.meses[key(p.y,p.m)]) ? calc(p.y,p.m) : null, catsAnt = {};
+  if (P) Object.entries(P.cats).filter(([,v]) => v > 0).forEach(([c,v]) => catsAnt[c] = r2(v));
+  return { mes:key(y,m), em:new Date().toISOString(), podeGastarHoje:r2(Math.max(livre / rest, 0)), sobramParaOMes:r2(livre), diasRestantes:rest,
+    entrou:r2(C.entradas - (C.saldoAnterior||0)), saldoDoMesAnterior:r2(C.saldoAnterior), saiu:r2(C.saidas + C.reservas), sobrou:r2(C.restante),
+    contasPendentes:r2(C.contasPend), gastosNoCredito:r2(C.credito), gastoPorCategoria:cats,
+    orcamentos: Object.fromEntries(orcamentosDoMes(y,m).map(([c,l]) => [c, { limite:r2(l), gasto:r2(C.cats[c]||0) }])),
+    mesAnterior: P ? { mes:key(p.y,p.m), entrou:r2(P.entradas - (P.saldoAnterior||0)), saiu:r2(P.saidas + P.reservas), gastoPorCategoria:catsAnt } : null,
+    cofrinhos:(S.cofrinhos||[]).map(c => ({ nome:c.nome, meta:r2(c.alvo) })) };
+}
 // Uma rodada: envia o que mudou (em lotes) e aplica o que chegou. modo 'juntar' (primeira vez com dados nos
 // dois lados: envia só os itens das listas e fica com as configurações da nuvem) ou 'nuvem' (usa só a nuvem).
 async function syncAgora(modo, manual){
@@ -1666,6 +1681,7 @@ async function syncAgora(modo, manual){
   if (!modo && !manual && form){ agendarSync(5000); return false; }   // não mexe nos dados com um lançamento aberto
   if (syncRodando){ syncDeNovo = true; return false; }
   syncRodando = true;
+  try { S.resumoPlus = resumoParaPlus(); } catch(e){}
   const st = syncEstado();
   try {
     const hashes = modo === 'nuvem' ? {} : { ...(st.hashes || {}) };
