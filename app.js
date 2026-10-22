@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 74;
+const APP_VERSAO = 75;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2437,7 +2437,9 @@ function calc(y,m){
   const simples = M.gastos.filter(g=>!ehParcelado(g));
 
   const entradasLanc = soma(M.entradas, e=>e.valor);
-  const saldoAnterior = (S.carry && P) ? P.restante : 0;
+  // O saldo só passa de um mês que tem entradas lançadas: meses que existem apenas por compras antigas lançadas
+  // depois (parcelas de antes de começar a usar o app) não viram "faltou no mês anterior".
+  const saldoAnterior = (S.carry && P && P.entradasLanc > 0) ? P.restante : 0;
   // faturas pagas neste mês (compras no crédito de meses/faturas anteriores); paga só em parte, conta o que foi pago
   const faturaAnterior = soma(faturasPorCartao(y,m), f => { const st = f.cartao && statusFatura(f.cartao.id, y, m); return st ? Math.min(st.pago, f.valor) : f.valor; });
   const gastosVista = soma(simples.filter(g=>g.forma!=='Crédito'), g=>g.valor);
