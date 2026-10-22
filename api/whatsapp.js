@@ -35,13 +35,20 @@ function assinaturaOk(req, bruto) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+// O token às vezes é salvo com espaço, quebra de linha ou "Bearer " na frente: limpa antes de usar.
+const tokenWa = () => String(process.env.WHATSAPP_TOKEN || '').trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '');
 async function responder(para, texto) {
+  const tk = tokenWa();
   const r = await fetch(`https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to: para, type: 'text', text: { body: texto } }),
   });
-  if (!r.ok) console.error('whatsapp envio', r.status, (await r.text()).slice(0, 300));
+  if (!r.ok){
+    const bruto = String(process.env.WHATSAPP_TOKEN || '');
+    console.error('whatsapp envio', r.status, (await r.text()).slice(0, 300), JSON.stringify({ temToken: !!bruto, tamOriginal: bruto.length,
+      tamLimpo: tk.length, comecaEAA: tk.startsWith('EAA'), tinhaEspaco: /\s/.test(bruto), tinhaBearer: /bearer/i.test(bruto), phoneId: PHONE_ID }));
+  }
 }
 
 // A IA lê a mensagem e devolve o lançamento em JSON (formato garantido pelo json_schema).
