@@ -155,9 +155,12 @@ async function carregar(){ todos = (await api({acao:'listar'})).lista; desenhar(
 /* Tino Plus: quem foi convidado, se já entrou (sessões) e se já sincronizou (itens no servidor). */
 async function carregarPlus(){
   let d; try { d = await api({ acao:'plusLista' }); } catch(e){ return; }
-  const ativo = (x) => x.plus_ate && new Date(x.plus_ate) > new Date();
+  // Assinatura que terminou (reembolso, chargeback, pausa) não conta, mesmo que a pessoa siga no Plus por um convite.
+  const encerrou = (x) => /^(refund|chargeback|subscription_paused)$/.test(x.assinatura.evento || '');
+  const ativo = (x) => !encerrou(x) && x.plus_ate && new Date(x.plus_ate) > new Date();
   const ativos = d.assinantes.filter(ativo), mrr = ativos.filter(x => x.assinatura.status !== 'canceled').reduce((t,x) => t + (+x.assinatura.valor || 0), 0);
-  const st = (x) => !ativo(x) ? '<span class="tag no">encerrada</span>' : x.assinatura.status === 'canceled' ? '<span class="tag l">cancelada (até o fim do período)</span>'
+  const st = (x) => encerrou(x) ? `<span class="tag no">${x.assinatura.evento === 'refund' ? 'reembolsada' : x.assinatura.evento === 'chargeback' ? 'chargeback' : 'pausada'}</span>`
+    : !ativo(x) ? '<span class="tag no">encerrada</span>' : x.assinatura.status === 'canceled' ? '<span class="tag l">cancelada (até o fim do período)</span>'
     : /late|refused/.test(x.assinatura.evento || '') ? '<span class="tag no">pagamento atrasado</span>' : '<span class="tag ok">ativa</span>';
   document.getElementById('plStats').innerHTML = [['Assinantes ativos', ativos.length], ['Receita mensal', 'R$ ' + mrr.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})],
     ['Novas no mês', d.doMes.novas], ['Cancelamentos no mês', d.doMes.canceladas], ['Atrasos no mês', d.doMes.atrasadas], ['Reembolsos no mês', d.doMes.reembolsos]]
