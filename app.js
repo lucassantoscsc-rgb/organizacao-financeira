@@ -83,7 +83,7 @@ if (TESTE && !DEMO) CONFIG.exigirCodigo = false;
 // Página de vendas do app (tinofinancas.com.br leva para /app; o domínio antigo continua funcionando).
 const LINK_COMPRA = 'https://www.tinofinancas.com.br';
 // Checkout da assinatura do Tino Plus na Cakto (preço normal e preço de fundador, para quem tem o vitalício)
-const LINK_PLUS = '', LINK_PLUS_FUNDADOR = '';
+const LINK_PLUS = 'https://pay.cakto.com.br/gtsweyx_1229875', LINK_PLUS_FUNDADOR = 'https://pay.cakto.com.br/33zgojc';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
