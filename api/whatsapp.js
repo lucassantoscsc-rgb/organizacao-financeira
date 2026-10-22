@@ -37,7 +37,11 @@ function assinaturaOk(req, bruto) {
 
 // O token às vezes é salvo com espaço, quebra de linha ou "Bearer " na frente: limpa antes de usar.
 const tokenWa = () => String(process.env.WHATSAPP_TOKEN || '').trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '');
+// O WhatsApp entrega celulares brasileiros sem o nono dígito (55 85 8888-0326). Para responder (e para a lista de
+// números permitidos do número de teste), usa o formato completo: 55 + DDD + 9 + 8 dígitos.
+const comNono = (n) => /^55\d{2}[6-9]\d{7}$/.test(n) ? n.slice(0, 4) + '9' + n.slice(4) : n;
 async function responder(para, texto) {
+  para = comNono(String(para));
   const tk = tokenWa();
   const r = await fetch(`https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, {
     method: 'POST',
