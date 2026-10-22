@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 70;
+const APP_VERSAO = 71;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2537,7 +2537,7 @@ function variacao(atual, anterior, menorMelhor){
 // últimos lançamentos. Gráficos, fluxo, orçamentos, assinaturas e cofrinhos ficam na Análise do mês.
 function telaResumo(){
   const C = calc(cur.y,cur.m);
-  const avisos = [cardPassos, alertasContas, cardConvitePlus, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
+  const avisos = [cardNavegadorInterno, cardPassos, alertasContas, cardConvitePlus, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
     cardRetro, cardTagAtiva, cardIndique, dicaTransferir, () => !S.listaDispensada && !precisaBackup() ? cardConectado() : ''];
   let aviso = '';
   for (const f of avisos){ aviso = f(); if (aviso) break; }
@@ -2779,6 +2779,35 @@ function blocoPrevisao(C){
   return h;
 }
 
+// Navegador de dentro de outro app (Gmail, Instagram, Facebook, TikTok...): ali não dá para instalar o Tino, e o que
+// for feito fica guardado só ali (abrir pelo Safari ou pelo ícone depois "começa do zero" e conta como outro aparelho).
+// Detecta pelo nome do app no navegador ou, no iPhone, pela falta de "Safari/" (navegador embutido).
+function navegadorInterno(){
+  const ua = navigator.userAgent;
+  if (navigator.standalone || matchMedia('(display-mode: standalone)').matches) return '';
+  const m = ua.match(/Instagram|FBAN|FBAV|FB_IAB|Messenger|LinkedInApp|BytedanceWebview|musical_ly|Snapchat|Pinterest|Twitter|GSA\/|Gmail/i);
+  if (m) return { instagram:'Instagram', fban:'Facebook', fbav:'Facebook', fb_iab:'Facebook', messenger:'Messenger', linkedinapp:'LinkedIn', bytedancewebview:'TikTok',
+    musical_ly:'TikTok', snapchat:'Snapchat', pinterest:'Pinterest', twitter:'X', 'gsa/':'app do Google', gmail:'Gmail' }[m[0].toLowerCase()] || 'outro app';
+  if (/iphone|ipad|ipod/i.test(ua) && /AppleWebKit/.test(ua) && !/Safari\//.test(ua)) return 'app de e-mail';
+  return '';
+}
+function blocoNavegadorInterno(onde){
+  const android = /android/i.test(navigator.userAgent);
+  return `<div class="dica-ios" style="border-color:#fcd34d;background:rgba(252,211,77,.14)"><b>⚠️ Você abriu o Tino dentro do ${esc(onde)}</b>
+    <p style="margin:6px 0 8px">Aqui não dá para instalar o app, e o que você anotar fica guardado só aqui. Abra no ${android ? 'Chrome' : 'Safari'}:</p>
+    ${android ? `<a class="btn pri" href="intent://${location.host}/#Intent;scheme=https;package=com.android.chrome;end">Abrir no Chrome</a>`
+      : `<ol><li>Toque em <b>Copiar link</b> abaixo.</li><li>Abra o <b>Safari</b> e cole na barra de endereço.</li><li>No Safari, siga as instruções para instalar.</li></ol>`}
+    <button class="btn sec" data-act="copiarLinkApp" style="margin-top:8px">Copiar link</button></div>`;
+}
+function cardNavegadorInterno(){
+  const onde = DEMO || S.navInternoFechado ? '' : navegadorInterno();
+  if (!onde) return '';
+  const android = /android/i.test(navigator.userAgent);
+  return `<div class="alert info backup"><span>⚠️</span><div><b>Você abriu o Tino dentro do ${esc(onde)}</b><br>
+    O que você anotar aqui fica guardado só aqui. Para instalar o app e não perder nada, abra no ${android ? 'Chrome' : 'Safari'}${android ? '' : ': copie o link, abra o Safari e cole na barra de endereço'}.
+    <div class="acts">${android ? `<a class="btn pri" href="intent://${location.host}/#Intent;scheme=https;package=com.android.chrome;end">Abrir no Chrome</a>` : ''}<button class="btn ${android ? 'sec' : 'pri'}" data-act="copiarLinkApp">Copiar link</button></div>
+    <button class="link-sutil" data-act="fecharNavInterno">Continuar aqui mesmo</button></div></div>`;
+}
 // No iPhone, quem usa pelo Safari e depois instala o app começa vazio (são armazenamentos separados).
 const noNavegadorIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
 function dicaTransferir(){
@@ -3806,6 +3835,8 @@ document.addEventListener('click', e=>{
   else if (a==='aparelhos'){ abrirAparelhos(); }
   else if (a==='removerAp'){ if (confirm(`Remover “${t.dataset.nome}” da sua conta?`)) carregarAparelhos('remover', t.dataset.alvo); }
   else if (a==='fecharDicaTransf'){ S.dicaTransfFechada = true; salvar(); render(); }
+  else if (a==='fecharNavInterno'){ S.navInternoFechado = true; salvar(); render(); }
+  else if (a==='copiarLinkApp'){ const l = location.origin + '/'; (navigator.clipboard ? navigator.clipboard.writeText(l) : Promise.reject()).then(() => toast('Link copiado ✓ Abra o Safari e cole na barra de endereço'), () => prompt('Copie o link e abra no Safari:', l)); }
   else if (a==='adiarBackup'){ S.backupAdiado = new Date().toISOString(); salvar(); render(); toast('Vamos lembrar de novo em 3 dias'); }
   else if (a==='importar'){ document.getElementById('fileImp').click(); }
   else if (a==='zerar'){
@@ -4215,11 +4246,13 @@ function renderAcesso(){
   // No iPhone, o app instalado na tela de início não enxerga o que foi feito no Safari (são separados).
   // Por isso orientamos a instalar antes de liberar.
   const iosNavegador = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
+  const interno = navegadorInterno();
   $app.innerHTML = `<div class="onb"><div class="in">
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>${esc(CONFIG.nomeApp)}</h1>
     <p class="slogan">${esc(CONFIG.slogan)}</p>
-    ${iosNavegador ? `<div class="dica-ios"><b>📲 Instale antes de entrar</b>
+    ${interno ? blocoNavegadorInterno(interno) + '<p style="margin-top:18px">Prefere continuar aqui mesmo? Digite o e-mail da compra:</p>'
+    : iosNavegador ? `<div class="dica-ios"><b>📲 Instale antes de entrar</b>
       <ol><li>Toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> ${/CriOS/.test(navigator.userAgent)?'ao lado do endereço':'na barra de baixo'}.</li>
       <li>Toque em <b>Adicionar à Tela de Início</b>.</li>
       <li>Abra o app pelo ícone na tela de início e digite seu e-mail lá.</li></ol>
