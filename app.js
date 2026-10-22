@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 67;
+const APP_VERSAO = 68;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1488,12 +1488,13 @@ function confirmarIndicacao(btn){
   }).catch(() => { btn.disabled = false; btn.textContent = 'Confirmar'; toast('Não foi possível confirmar. Confira a internet.'); });
 }
 
-/* ---------- Tino Plus (em construção: só aparece no endereço de teste) ----------
+/* ---------- Tino Plus (escondido: aparece para convidados, assinantes e quem abriu o link ?plus=1) ----------
    Login com código de 6 dígitos enviado por e-mail (api/plus). A sessão fica numa chave própria do aparelho,
    fora do S, para não ir junto nos arquivos de backup. */
 const PLUS_KEY = 'orgfin:plus';
 // Convidados para testar o Plus (liberados no painel admin). O app confere uma vez por dia.
-const plusVisivel = () => !DEMO && (TESTE || !!S.plusConvite || !!plusSessao());
+// Link de convite: quem abre o app com ?plus=1 passa a ver o Tino Plus em Ajustes (S.plusLink).
+const plusVisivel = () => !DEMO && (TESTE || !!S.plusConvite || !!S.plusLink || !!plusSessao());
 function conferirConvitePlus(){
   if (DEMO || TESTE || !S.conta || !S.conta.includes('@') || !navigator.onLine || S.plusConviteVisto === dataHoje()) return;
   fetch('api/plus', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'convite', conta:S.conta, aparelho:idAparelho() }) })
@@ -3321,8 +3322,8 @@ function telaAjustes(){
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const instalado = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
   const tema = S.tema || 'auto';
-  return `${plusVisivel() ? `<section class="card"><h3>⭐ Tino Plus <small class="muted">(${TESTE ? 'em construção' : 'teste para convidados'})</small></h3>
-    <p class="note" style="margin:0 0 12px">${plusSessao() ? `Conectado como <b>${esc(plusSessao().email)}</b>.` : TESTE ? 'Entre com o seu e-mail para testar o login do Plus.' : 'Você foi convidado para testar o Tino Plus antes do lançamento: seus dados em todos os aparelhos, sempre sincronizados.'}</p>
+  return `${plusVisivel() ? `<section class="card"><h3>⭐ Tino Plus${TESTE ? ' <small class="muted">(endereço de teste)</small>' : ''}</h3>
+    <p class="note" style="margin:0 0 12px">${plusSessao() ? `Conectado como <b>${esc(plusSessao().email)}</b>.` : S.plusConvite ? 'Você foi convidado para testar o Tino Plus antes do lançamento: seus dados em todos os aparelhos, sempre sincronizados, e o Tino no WhatsApp.' : 'Seus dados em todos os aparelhos, o Tino no WhatsApp (anote por texto, foto ou áudio) e lembretes das contas e da fatura.'}</p>
     <button class="btn sec" data-act="plus">${plusSessao() ? 'Ver minha conta Plus' : 'Entrar no Tino Plus'}</button></section>` : ''}
   <section class="card"><h3>Aparência</h3>
     <div class="temas">${[['auto','Automático'],['claro','☀️ Claro'],['escuro','🌙 Escuro']].map(([v,l])=>`<button class="${tema===v?'on':''}" data-act="tema" data-v="${v}">${l}</button>`).join('')}</div>
@@ -4295,7 +4296,8 @@ function iniciarApp(){
   if (parametros.has('novo') && S.liberado && S.perfil.ok) setTimeout(() => abrirForm('gastos'), 300);
   // Atalhos: notificação de domingo (?semana), atalho do ícone (?colar) e "Compartilhar → Tino" no Android (?texto=...)
   if (S.liberado && S.perfil.ok){
-    if (parametros.has('semana')) setTimeout(abrirSemana, 300);
+    if (parametros.has('plus') && !DEMO){ S.plusLink = true; salvar(); setTimeout(abrirPlus, 300); }
+    else if (parametros.has('semana')) setTimeout(abrirSemana, 300);
     else if (parametros.has('texto') || parametros.has('titulo')){ const txt = [parametros.get('titulo'), parametros.get('texto')].filter(Boolean).join(' '); setTimeout(() => interpretarTextoBanco(txt) ? lancarTexto(txt) : (abrirColar(), setTimeout(()=>{ const c = document.getElementById('cTexto'); if (c) c.value = txt; }, 50)), 300); }
     else if (parametros.has('colar')) setTimeout(abrirColar, 300);
   }
