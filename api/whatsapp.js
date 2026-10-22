@@ -89,9 +89,10 @@ categoria (só para gasto): a que melhor combina, escolhida da lista. Na dúvida
 forma: "Crédito" se falar cartão de crédito/no crédito/parcelado; "Débito" se falar débito; senão "Pix / Dinheiro".
 parcelas: número de vezes se for parcelado ("em 3x" → 3); senão 1.
 cartao: o nome do cartão citado, se for um destes: ${cartoes.length ? cartoes.join(', ') : '(nenhum cadastrado)'}; senão "".
-Se vier uma foto ou PDF: é um comprovante (Pix, nota fiscal, cupom, recibo, maquininha). Use o VALOR TOTAL pago, o estabelecimento ou quem recebeu como descricao, e a data do comprovante.
+Se vier uma foto ou PDF, a pessoa quer anotar o que aparece nela. Pode ser comprovante (Pix, nota fiscal, cupom, recibo, maquininha): use o VALOR TOTAL pago, o estabelecimento ou quem recebeu como descricao, e a data do comprovante.
+Pode ser também etiqueta de preço, produto com preço, cardápio ou conta com valor: considere que a pessoa comprou, use o preço (o maior em destaque; "99,90" → 99.9), descreva o produto (ex.: "Bermuda") e use a data de hoje.
 Comprovante de Pix ou transferência RECEBIDA (a pessoa é quem recebeu) é "entrada". Pix enviado ou pagamento é "gasto" com forma "Pix / Dinheiro", salvo se o comprovante ou a legenda indicar crédito ou débito.
-A legenda que acompanha a foto vale mais que a foto (ex.: "no crédito em 3x"). Se a imagem não for um comprovante ou não der para ler o valor, tipo "outro".`,
+A legenda que acompanha a foto vale mais que a foto (ex.: "no crédito em 3x"). Só use tipo "outro" se não houver nenhum valor em reais legível na imagem.`,
     messages: [{ role: 'user', content: midia ? [
       { type: midia.tipo === 'application/pdf' ? 'document' : 'image', source: { type: 'base64', media_type: midia.tipo, data: midia.dados } },
       { type: 'text', text: texto || '(foto do comprovante, sem legenda)' },
@@ -142,7 +143,7 @@ async function lancar(sql, conta, texto, midia) {
   const it = await interpretar(texto, categorias, cartoes.map((c) => c.nome), midia);
   if (it && it.tipo === 'pergunta' && !midia) return responderPergunta(sql, conta, texto);
   if (midia && (!it || it.tipo === 'outro' || it.tipo === 'pergunta' || !(it.valor > 0))) {
-    return 'Não consegui ler o valor nesse comprovante 🤔 Tente uma foto mais nítida, com o valor aparecendo, ou me escreva: "gastei 45 no mercado no pix".';
+    return 'Não achei um valor nessa foto 🤔 Tente uma foto mais nítida, com o valor aparecendo, ou me escreva: "gastei 45 no mercado no pix".';
   }
   if (!it || it.tipo === 'outro' || !(it.valor > 0)) {
     return 'Não entendi 🤔 Você pode me mandar um gasto ou uma pergunta:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• "quanto posso gastar hoje?"\n• "quanto gastei com mercado esse mês?"';
