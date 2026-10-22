@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 72;
+const APP_VERSAO = 73;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -3160,11 +3160,17 @@ function telaLanc(){
     const parcOutras = parcelasDoMes(cur.y,cur.m).filter(x=>x.i>0);
     const totMes = soma(gs.filter(g=>!ehParcelado(g)),g=>g.valor) + soma(parcelasDoMes(cur.y,cur.m),x=>x.valor);
     h += `<div class="totalrow"><span>Total de gastos</span><b class="num">${brl(totMes)}</b></div><div class="list">`;
+    // Faturas e gastos numa lista só, por data: a fatura paga aparece na data do pagamento; a pendente, na do vencimento.
+    const linhas = [];
     faturasPorCartao(cur.y,cur.m).forEach(f => { const tag = f.cartao ? `button class="item" data-act="fatAbrir" data-c="${f.cartao.id}"` : 'div class="item"';
-      h += `<${tag}><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento} · toque para ver as compras`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></${tag.split(' ')[0]}>`; });
-    gs.forEach(g=>{
+      const st = f.cartao ? statusFatura(f.cartao.id, cur.y, cur.m) : null, venc = f.cartao ? vencFatura(f.cartao, cur.y, cur.m) : '';
+      const t2 = f.cartao ? (st ? `✅ Paga em ${fmtData(st.em)}${st.pago < f.valor - 0.004 ? ` · ${brl(st.pago)} de ${brl(f.valor)}` : ''} · toque para ver as compras` : `Vence dia ${f.cartao.vencimento} · toque para ver as compras`)
+        : `Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`;
+      linhas.push({ d: st ? st.em : venc, h: `<${tag}><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} ${st ? '<span class="tag auto">✓ paga</span>' : '<span class="tag auto">automático</span>'}</div><div class="t2">${t2}</div></div><div class="val num down">${brl(st ? st.pago : f.valor)}</div></${tag.split(' ')[0]}>` }); });
+    gs.forEach(g=>{ const ini = h.length;
       const parc = ehParcelado(g);
-      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.fixa?'<span class="tag auto">🔁 todo mês</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
+      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.fixa?'<span class="tag auto">🔁 todo mês</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`;  linhas.push({ d: g.data || '', h: h.slice(ini) }); h = h.slice(0, ini); });
+    linhas.sort((a,b) => (b.d||'').localeCompare(a.d||'')).forEach(l => h += l.h);
     parcOutras.forEach(x=>{
       h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
