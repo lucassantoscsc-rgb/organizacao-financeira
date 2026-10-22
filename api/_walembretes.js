@@ -7,7 +7,8 @@
 // Modelos que precisam estar aprovados no WhatsApp Manager (categoria Utilidade, idioma pt_BR):
 //   tino_conta_vence    "🔔 Lembrete do Tino: vence {{1}}: {{2}}. Se já pagou, é só marcar como paga no app."
 //   tino_fatura_fecha   "💳 Lembrete do Tino: a fatura do cartão {{1}} fecha {{2}}, com {{3}} até agora. Compras feitas depois do fechamento entram na fatura seguinte."
-//   tino_resumo_semana  "📊 Sua semana no Tino: você gastou {{1}} nos últimos 7 dias, a maior parte em {{2}}. Quer saber quanto ainda pode gastar no mês? É só me perguntar aqui."
+//   tino_extrato_semana "📊 Resumo da sua conta no Tino: nos 7 dias até {{1}}, foram anotados {{2}} em gastos. A categoria com o maior valor foi {{3}}. Os detalhes estão no app."
+//   (o tino_resumo_semana, com convite para perguntar, foi reclassificado como marketing pela Meta)
 const { redis } = require('./_db');
 const { plusAtivo } = require('./_pg');
 const { avisar } = require('./_wa');
@@ -66,7 +67,7 @@ async function lembretesDaConta(sql, conta, { forcar = false, soModelo = false }
       const top = Object.entries(cats).sort((a, b) => b[1] - a[1])[0];
       const onde = `${top[0]} (${brl(top[1])})`;
       await avisar(para, `📊 Sua semana no Tino: você gastou ${brl(total)} nos últimos 7 dias, a maior parte em ${onde}.\n\nQuer saber quanto ainda pode gastar no mês? É só me perguntar aqui.`,
-        'tino_resumo_semana', [brl(total), onde], soModelo);
+        'tino_extrato_semana', [ddmm(hoje), brl(total), onde], soModelo);
       n++;
     }
   }
