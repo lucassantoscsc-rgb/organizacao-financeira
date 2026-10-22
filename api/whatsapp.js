@@ -167,7 +167,13 @@ module.exports = async (req, res) => {
   }
   if (req.method !== 'POST') return res.status(405).end();
   const bruto = await corpoBruto(req);
-  if (!assinaturaOk(req, bruto)) return res.status(401).end();
+  if (!assinaturaOk(req, bruto)) {
+    // diagnóstico sem expor segredos: só se existem e os tamanhos
+    const seg = process.env.WHATSAPP_APP_SECRET || '';
+    console.error('whatsapp assinatura recusada', JSON.stringify({ temSegredo: !!seg, tamSegredo: seg.length, tamCorpo: bruto.length,
+      temCabecalho: !!req.headers['x-hub-signature-256'], bodyJaLido: typeof req.body }));
+    return res.status(401).end();
+  }
   let corpo; try { corpo = JSON.parse(bruto.toString('utf8')); } catch (e) { return res.status(400).end(); }
   try {
     const sql = await banco();
