@@ -2,8 +2,11 @@
 // - "Anotou seus gastos de hoje?" para quem ativou e ainda não lançou nada hoje;
 // - "X contas vencem amanhã" para quem ativou o aviso de contas;
 // - aos domingos, um convite para ver o resumo da semana (só para quem ativou o lembrete diário).
+// - Tino Plus: os lembretes pelo WhatsApp (api/_walembretes.js).
 const webpush = require('web-push');
 const { redis } = require('./_db');
+const { banco } = require('./_pg');
+const { lembretesWhatsApp } = require('./_walembretes');
 
 module.exports = async (req, res) => {
   if (!process.env.CRON_SECRET || req.headers.authorization !== `Bearer ${process.env.CRON_SECRET}`)
@@ -32,5 +35,8 @@ module.exports = async (req, res) => {
       else falhas++;
     }
   }
-  res.json({ ok: true, inscritos: todos.length / 2, enviados, jaAnotouHoje: jaAnotou, removidos, falhas });
+  // Tino Plus: lembretes pelo WhatsApp (contas, fatura e resumo da semana)
+  let whatsapp = null;
+  if (process.env.WHATSAPP_TOKEN) { try { whatsapp = await lembretesWhatsApp(await banco()); } catch (e) { whatsapp = { erro: e.message }; } }
+  res.json({ ok: true, inscritos: todos.length / 2, enviados, jaAnotouHoje: jaAnotou, removidos, falhas, whatsapp });
 };

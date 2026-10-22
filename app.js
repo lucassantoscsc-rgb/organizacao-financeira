@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 63;
+const APP_VERSAO = 64;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1540,7 +1540,9 @@ async function abrirPlus(){
 // Tino no WhatsApp: o app gera um código, o cliente manda para o número do Tino e pronto.
 function blocoWhatsApp(c){
   if (c.whatsapp) return `<h3 style="margin:18px 0 6px">💬 Tino no WhatsApp</h3>
-    <p class="note" style="margin:0 0 12px">✅ Conectado. Mande seus gastos para o Tino no WhatsApp, do seu jeito: "gastei 45 no mercado no pix", "uber 23 ontem", "tênis 600 em 3x no crédito". Eles aparecem aqui na próxima sincronização.</p>
+    <p class="note" style="margin:0 0 12px">✅ Conectado. Mande seus gastos para o Tino no WhatsApp, do seu jeito: "gastei 45 no mercado no pix", "uber 23 ontem", "tênis 600 em 3x no crédito", uma foto do comprovante ou um áudio. E pergunte: "quanto posso gastar hoje?"</p>
+    <p class="note" style="margin:0 0 12px">🔔 <b>Lembretes no WhatsApp:</b> ${S.waLembretes === false ? 'desligados.' : 'ligados. O Tino avisa na véspera das contas e das faturas que vencem, quando a fatura vai fechar e, aos domingos, quanto você gastou na semana.'}</p>
+    <button class="btn sec" data-act="waLembretes">${S.waLembretes === false ? '🔔 Ligar lembretes' : '🔕 Desligar lembretes'}</button>
     <button class="link-sutil" data-act="waDesligar">Desconectar o WhatsApp</button>`;
   if (!(syncEstado() || {}).ligado) return `<h3 style="margin:18px 0 6px">💬 Tino no WhatsApp</h3>
     <p class="note" style="margin:0 0 12px">Ligue a sincronização acima para poder anotar seus gastos pelo WhatsApp.</p>`;
@@ -1672,7 +1674,23 @@ function resumoParaPlus(){
     contasPendentes:r2(C.contasPend), gastosNoCredito:r2(C.credito), gastoPorCategoria:cats,
     orcamentos: Object.fromEntries(orcamentosDoMes(y,m).map(([c,l]) => [c, { limite:r2(l), gasto:r2(C.cats[c]||0) }])),
     mesAnterior: P ? { mes:key(p.y,p.m), entrou:r2(P.entradas - (P.saldoAnterior||0)), saiu:r2(P.saidas + P.reservas), gastoPorCategoria:catsAnt } : null,
-    cofrinhos:(S.cofrinhos||[]).map(c => ({ nome:c.nome, meta:r2(c.alvo) })) };
+    cofrinhos:(S.cofrinhos||[]).map(c => ({ nome:c.nome, meta:r2(c.alvo) })), agenda: agendaParaPlus() };
+}
+// Agenda para os lembretes do WhatsApp: contas e faturas a pagar (este mês e o próximo) e fechamentos de fatura.
+function agendaParaPlus(){
+  const out = [], kh = chaveHoje(), hojeTxt = dataHoje(), prox = nextYM(hoje.getFullYear(), hoje.getMonth()), kp = key(prox.y, prox.m);
+  const r2 = (v) => Math.round((+v || 0) * 100) / 100, dia = (k, d) => { const o = ymDe(k); return k + '-' + String(Math.min(+d, diasNoMes(o.y,o.m))).padStart(2,'0'); };
+  const add = (x) => { if (x.data >= hojeTxt) out.push(x); };
+  (S.meses[kh] ? S.meses[kh].contas : []).filter(c => !c.pago && c.venc).forEach(c => add({ tipo:'conta', nome:c.nome, valor:r2(c.valor || c.planejado), data:dia(kh, c.venc) }));
+  const modelo = S.meses[kp] && S.meses[kp].contas.length ? S.meses[kp].contas.filter(c => !c.pago) : (S.meses[kh] ? S.meses[kh].contas : []);
+  modelo.filter(c => c.venc).forEach(c => add({ tipo:'conta', nome:c.nome, valor:r2(c.valor || c.planejado), data:dia(kp, c.venc) }));
+  [kh, kp].forEach(k => { const o = ymDe(k); faturasPorCartao(o.y, o.m).forEach(f => {
+    if (f.cartao && !statusFatura(f.cartao.id, o.y, o.m)) add({ tipo:'fatura', nome:'Fatura ' + f.cartao.nome, valor:r2(f.valor), data:dia(k, f.cartao.vencimento) }); }); });
+  (S.cartoes || []).filter(c => c.fechamento).forEach(c => [kh, kp].forEach(k => {
+    const d = dia(k, c.fechamento), pg = mesPagamento(d, null, c);
+    add({ tipo:'fechamento', nome:c.nome, valor:r2(soma(faturasDoMes(pg.y, pg.m).filter(x => x.cartao === c.id), x => x.valor)), data:d });
+  }));
+  return out.sort((a,b) => a.data < b.data ? -1 : 1).slice(0, 60);
 }
 // Uma rodada: envia o que mudou (em lotes) e aplica o que chegou. modo 'juntar' (primeira vez com dados nos
 // dois lados: envia só os itens das listas e fica com as configurações da nuvem) ou 'nuvem' (usa só a nuvem).
@@ -3680,6 +3698,7 @@ document.addEventListener('click', e=>{
   if (a==='plusSair'){ plusApi({ acao:'sair' }).catch(()=>{}); syncGuardar(null); plusGuardar(null); fechar(); render(); toast('Você saiu do Plus neste aparelho'); return; }
   if (a==='syncLigar'){ ligarSync(t); return; }
   if (a==='waConectar'){ conectarWhatsApp(t); return; }
+  if (a==='waLembretes'){ S.waLembretes = S.waLembretes === false; salvar(); toast(S.waLembretes ? 'Lembretes ligados 🔔' : 'Lembretes desligados'); abrirPlus(); return; }
   if (a==='waDesligar'){ if (!confirm('Desconectar o WhatsApp do Tino?')) return; plusApi({ acao:'waDesligar' }).then(() => { toast('WhatsApp desconectado'); abrirPlus(); }); return; }
   if (a==='syncJuntar'){ rodarPrimeiraSync('juntar'); return; }
   if (a==='syncNuvem'){ rodarPrimeiraSync('nuvem'); return; }

@@ -13,9 +13,10 @@ const AnthropicSdk = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicSdk.default || AnthropicSdk;
 const { redis } = require('./_db');
 const { banco, plusAtivo } = require('./_pg');
+const { tokenWa, responder, marcarJanela } = require('./_wa');
+const { lembretesDaConta } = require('./_walembretes');
 
 const TESTE = process.env.VERCEL_ENV !== 'production';
-const PHONE_ID = process.env.WHATSAPP_PHONE_ID || '1457233977454720';   // número de teste da Meta, até termos o oficial
 const MODELO = 'claude-haiku-5-5';        // entende a mensagem e anota (rápido e barato)
 const MODELO_PERGUNTAS = 'claude-opus-5-5'; // responde perguntas abertas sobre o dinheiro da pessoa
 const CATEGORIAS = ['🧾 Parcela','🧾 Contas','🧺 Mercado','🍗 Alimentação','⛽ Gasolina','🚗 Transporte','🏠 Casa','💊 Saúde',
@@ -37,26 +38,6 @@ function assinaturaOk(req, bruto) {
   if (!segredo || !veio.startsWith('sha256=')) return false;
   const a = Buffer.from(veio.slice(7)), b = Buffer.from(crypto.createHmac('sha256', segredo).update(bruto).digest('hex'));
   return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-// O token às vezes é salvo com espaço, quebra de linha ou "Bearer " na frente: limpa antes de usar.
-const tokenWa = () => String(process.env.WHATSAPP_TOKEN || '').trim().replace(/^Bearer\s+/i, '').replace(/\s+/g, '');
-// O WhatsApp entrega celulares brasileiros sem o nono dígito (55 85 8888-0326). Para responder (e para a lista de
-// números permitidos do número de teste), usa o formato completo: 55 + DDD + 9 + 8 dígitos.
-const comNono = (n) => /^55\d{2}[6-9]\d{7}$/.test(n) ? n.slice(0, 4) + '9' + n.slice(4) : n;
-async function responder(para, texto) {
-  para = comNono(String(para));
-  const tk = tokenWa();
-  const r = await fetch(`https://graph.facebook.com/v25.0/${PHONE_ID}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${tk}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to: para, type: 'text', text: { body: texto } }),
-  });
-  if (!r.ok){
-    const bruto = String(process.env.WHATSAPP_TOKEN || '');
-    console.error('whatsapp envio', r.status, (await r.text()).slice(0, 300), JSON.stringify({ temToken: !!bruto, tamOriginal: bruto.length,
-      tamLimpo: tk.length, comecaEAA: tk.startsWith('EAA'), tinhaEspaco: /\s/.test(bruto), tinhaBearer: /bearer/i.test(bruto), phoneId: PHONE_ID }));
-  }
 }
 
 // Baixa a foto ou o PDF que a pessoa mandou (a Meta dá um link temporário que exige o token).
@@ -241,6 +222,7 @@ async function tratar(sql, msg) {
   const texto = String(msg.type === 'text' ? (msg.text && msg.text.body) || '' : (arquivo && arquivo.caption) || '').trim();
   // mensagem repetida (a Meta reenvia se demorarmos): trata uma vez só
   if (!(await redis('SET', 'wa:msg:' + msg.id, '1', 'NX', 'EX', 86400))) return;
+  await marcarJanela(de);   // nas próximas 24 h o Tino pode mandar texto livre (fora disso, só modelos aprovados)
 
   const cod = texto.toUpperCase().match(/\bTINO-([A-Z0-9]{4})\b/);
   if (cod) {
@@ -255,6 +237,21 @@ async function tratar(sql, msg) {
   if (!conta) return responder(de, 'Oi! Eu sou o Tino 💚 Para anotar seus gastos por aqui, conecte este WhatsApp no app: Ajustes → Tino Plus → Conectar WhatsApp.');
   if (!TESTE && !plusAtivo(conta)) return responder(de, 'O Tino no WhatsApp é um recurso do Tino Plus. Veja em Ajustes → Tino Plus no app.');
   if (!(await limite(de))) return responder(de, 'Muitas mensagens em pouco tempo. Espere um pouquinho e tente de novo 🙏');
+
+  // lembretes: ligar e desligar por aqui (a escolha vai para o app pela sincronização)
+  const cmd = texto.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z ]/g, '').trim();
+  if (/^(parar|desligar|cancelar|sem) lembretes?$/.test(cmd) || /^(ligar|ativar|voltar) lembretes?$/.test(cmd)) {
+    const ligar = /^(ligar|ativar|voltar)/.test(cmd);
+    await sql`INSERT INTO itens (email, chave, valor, apagado, seq, aparelho, alterado)
+      VALUES (${conta.email}, 'v|waLembretes', ${JSON.stringify(ligar)}::jsonb, false, nextval('itens_seq'), 'whatsapp', now())
+      ON CONFLICT (email, chave) DO UPDATE SET valor = EXCLUDED.valor, apagado = false, seq = EXCLUDED.seq, aparelho = 'whatsapp', alterado = now()`;
+    return responder(de, ligar ? 'Lembretes ligados 🔔 Eu aviso na véspera das contas e das faturas, quando a fatura vai fechar e, aos domingos, como foi a sua semana.'
+      : 'Pronto, não vou mais mandar lembretes 🔕 Para voltar, mande "ligar lembretes".');
+  }
+  if (TESTE && (cmd === 'testar lembretes' || cmd === 'testar modelos')) {
+    const n = await lembretesDaConta(sql, conta, { forcar: true, soModelo: cmd === 'testar modelos' });
+    return n ? undefined : responder(de, 'Não achei contas, faturas nem gastos da semana para lembrar. Sincronize o app e tente de novo.');
+  }
   if (msg.type === 'audio' && msg.audio) {
     if (!process.env.ELEVENLABS_API_KEY) return responder(de, 'Ainda não entendo áudio 🙂 Me mande por escrito ou a foto do comprovante.');
     // ~1 minuto de áudio do WhatsApp (opus) tem uns 150 KB; o limite segura áudios longos demais
