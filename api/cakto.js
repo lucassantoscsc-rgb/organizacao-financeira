@@ -33,7 +33,15 @@ module.exports = async (req, res) => {
   const corpo = req.body || {};
   // O Plus tem um webhook próprio na Cakto (CAKTO_PLUS_SECRET), que só pode mexer em assinaturas.
   const doPlus = secretOk(corpo.secret, process.env.CAKTO_PLUS_SECRET);
-  if (!doPlus && !secretOk(corpo.secret)) return res.status(401).json({ ok: false });
+  if (!doPlus && !secretOk(corpo.secret)) {
+    // no endereço de teste, explica a recusa sem revelar segredos (tamanhos e 6 letras do hash)
+    if (process.env.VERCEL_ENV !== 'production') {
+      const imp = (x) => x ? crypto.createHash('sha256').update(String(x)).digest('hex').slice(0, 6) + ' tam ' + String(x).length : 'vazio';
+      return res.status(401).json({ ok: false, teste: { veio: imp(corpo.secret), plus: imp(process.env.CAKTO_PLUS_SECRET), vitalicio: imp(process.env.CAKTO_SECRET),
+        campos: Object.keys(corpo), cabecalhos: Object.keys(req.headers).filter((h) => /cakto|signature|secret|token|auth/i.test(h)) } });
+    }
+    return res.status(401).json({ ok: false });
+  }
 
   const dados = corpo.data || {};
   const cliente = dados.customer || {};
