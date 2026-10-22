@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 69;
+const APP_VERSAO = 70;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1492,15 +1492,18 @@ function confirmarIndicacao(btn){
    Login com código de 6 dígitos enviado por e-mail (api/plus). A sessão fica numa chave própria do aparelho,
    fora do S, para não ir junto nos arquivos de backup. */
 const PLUS_KEY = 'orgfin:plus';
-// Convidados para testar o Plus (liberados no painel admin). O app confere uma vez por dia.
+// Convidados para testar o Plus (liberados no painel admin). Quem ainda não foi convidado confere a cada abertura
+// (no máximo a cada 10 minutos), para o convite aparecer logo; quem já foi, confere uma vez por dia.
 // Link de convite: quem abre o app com ?plus=1 passa a ver o Tino Plus em Ajustes (S.plusLink).
 const plusVisivel = () => !DEMO && (TESTE || !!S.plusConvite || !!S.plusLink || !!plusSessao());
 function conferirConvitePlus(){
-  if (DEMO || TESTE || !S.conta || !S.conta.includes('@') || !navigator.onLine || S.plusConviteVisto === dataHoje()) return;
+  if (DEMO || TESTE || !S.conta || !S.conta.includes('@') || !navigator.onLine) return;
+  const ult = +S.plusConviteEm || 0;
+  if (S.plusConvite ? S.plusConviteVisto === dataHoje() : Date.now() - ult < 10 * 60e3) return;
   fetch('api/plus', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ acao:'convite', conta:S.conta, aparelho:idAparelho() }) })
     .then(r => r.ok ? r.json() : null).then(d => {
       if (!d || !d.ok) return;
-      const antes = !!S.plusConvite; S.plusConvite = !!d.convidado; S.plusConviteVisto = dataHoje(); salvar();
+      const antes = !!S.plusConvite; S.plusConvite = !!d.convidado; S.plusConviteVisto = dataHoje(); S.plusConviteEm = Date.now(); salvar();
       if (antes !== S.plusConvite && !ocupado()) render();
     }).catch(() => {});
 }
@@ -1788,7 +1791,7 @@ async function rodarPrimeiraSync(modo){
   toast('Sincronização ligada ✓'); abrirPlus();
 }
 // Sincroniza ao abrir o app, ao voltar para ele e quando a internet volta.
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') agendarSync(800); });
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible'){ agendarSync(800); conferirConvitePlus(); } });
 window.addEventListener('online', () => agendarSync(800));
 // Com o app aberto na tela, confere a cada minuto: o que chegou pelo WhatsApp aparece sem precisar recarregar.
 setInterval(() => { if (document.visibilityState === 'visible' && !syncRodando) agendarSync(0); }, 60000);
