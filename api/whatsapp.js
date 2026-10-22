@@ -7,6 +7,7 @@
 //                            (tabela itens) e aparece no app pela sincronização; o Tino confirma a mensagem.
 //   foto ou PDF do comprovante → a mesma IA lê o comprovante e anota (a legenda, se houver, ajuda: "no crédito em 3x")
 //   "quanto posso gastar hoje?" → o Claude Opus responde com o resumo do mês que o app envia na sincronização
+//   áudio                 → o ElevenLabs (ELEVENLABS_API_KEY) transforma em texto, que segue o mesmo caminho do texto
 const crypto = require('crypto');
 const AnthropicSdk = require('@anthropic-ai/sdk');
 const Anthropic = AnthropicSdk.default || AnthropicSdk;
@@ -60,16 +61,31 @@ async function responder(para, texto) {
 
 // Baixa a foto ou o PDF que a pessoa mandou (a Meta dá um link temporário que exige o token).
 const MIDIAS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
-async function baixarMidia(id) {
+const AUDIOS = ['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/aac', 'audio/amr'];
+async function baixarMidia(id, tipos = MIDIAS, max = 4.5e6) {
   const auth = { Authorization: `Bearer ${tokenWa()}` };
   const info = await fetch(`https://graph.facebook.com/v25.0/${id}`, { headers: auth }).then((r) => r.ok ? r.json() : null);
   if (!info || !info.url) return null;
   const tipo = String(info.mime_type || '').split(';')[0].trim();
-  if (!MIDIAS.includes(tipo) || +info.file_size > 4.5e6) return { tipo, grande: +info.file_size > 4.5e6 };
+  if (!tipos.includes(tipo) || +info.file_size > max) return { tipo, grande: +info.file_size > max };
   const r = await fetch(info.url, { headers: auth });
   if (!r.ok) return null;
   const buf = Buffer.from(await r.arrayBuffer());
-  return { tipo, dados: buf.toString('base64'), hash: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32) };
+  return { tipo, buf, dados: buf.toString('base64'), hash: crypto.createHash('sha256').update(buf).digest('hex').slice(0, 32) };
+}
+
+// Áudio → texto (ElevenLabs Speech to Text, em português).
+async function transcrever(audio) {
+  const form = new FormData();
+  form.append('model_id', process.env.ELEVENLABS_STT_MODELO || 'scribe_v1');
+  form.append('language_code', 'por');
+  form.append('tag_audio_events', 'false');
+  form.append('file', new Blob([audio.buf], { type: audio.tipo }), 'audio');
+  const r = await fetch('https://api.elevenlabs.io/v1/speech-to-text', {
+    method: 'POST', headers: { 'xi-api-key': String(process.env.ELEVENLABS_API_KEY || '').trim() }, body: form,
+  });
+  if (!r.ok) { console.error('whatsapp transcrição', r.status, (await r.text()).slice(0, 300)); return null; }
+  return String((await r.json()).text || '').trim();
 }
 
 // A IA lê a mensagem (texto, ou foto/PDF do comprovante com a legenda) e devolve o lançamento em JSON
@@ -223,14 +239,24 @@ async function tratar(sql, msg) {
     if (!c) return responder(de, 'Esse código expirou ou não existe. Gere outro no app: Ajustes → Tino Plus → Conectar WhatsApp.');
     await sql`UPDATE contas SET whatsapp = NULL WHERE whatsapp = ${de}`;
     await sql`UPDATE contas SET whatsapp = ${de} WHERE email = ${c.email}`;
-    return responder(de, `Pronto! Seu WhatsApp está conectado ao Tino ✅\n\nAgora é só me mandar seus gastos, do seu jeito:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• 📸 uma foto do comprovante\n\nE pode perguntar: "quanto posso gastar hoje?"`);
+    return responder(de, `Pronto! Seu WhatsApp está conectado ao Tino ✅\n\nAgora é só me mandar seus gastos, do seu jeito:\n• "gastei 45 no mercado no pix"\n• "uber 23 ontem"\n• "tênis 600 em 3x no crédito"\n• "recebi 1500 de salário"\n• 📸 uma foto do comprovante\n• 🎤 um áudio\n\nE pode perguntar: "quanto posso gastar hoje?"`);
   }
 
   const [conta] = await sql`SELECT * FROM contas WHERE whatsapp = ${de}`;
   if (!conta) return responder(de, 'Oi! Eu sou o Tino 💚 Para anotar seus gastos por aqui, conecte este WhatsApp no app: Ajustes → Tino Plus → Conectar WhatsApp.');
   if (!TESTE && !plusAtivo(conta)) return responder(de, 'O Tino no WhatsApp é um recurso do Tino Plus. Veja em Ajustes → Tino Plus no app.');
-  if (!texto && !arquivo) return responder(de, 'Por enquanto eu entendo texto e foto do comprovante 🙂 Ex.: "gastei 45 no mercado no pix".');
   if (!(await limite(de))) return responder(de, 'Muitas mensagens em pouco tempo. Espere um pouquinho e tente de novo 🙏');
+  if (msg.type === 'audio' && msg.audio) {
+    if (!process.env.ELEVENLABS_API_KEY) return responder(de, 'Ainda não entendo áudio 🙂 Me mande por escrito ou a foto do comprovante.');
+    // ~1 minuto de áudio do WhatsApp (opus) tem uns 150 KB; o limite segura áudios longos demais
+    const audio = await baixarMidia(msg.audio.id, AUDIOS, 400e3);
+    if (!audio) return responder(de, 'Não consegui abrir esse áudio 😕 Tente mandar de novo.');
+    if (!audio.buf) return responder(de, audio.grande ? 'Esse áudio é longo demais 😅 Mande um áudio curto, de até 1 minuto, ou escreva.' : 'Não consegui ouvir esse áudio 😕 Tente gravar de novo.');
+    const ouvido = await transcrever(audio);
+    if (!ouvido) return responder(de, 'Não consegui entender o áudio 😕 Tente de novo, falando o valor e o que foi, ou escreva.');
+    return responder(de, `🎤 Entendi: "${ouvido.slice(0, 300)}"\n\n` + await lancar(sql, conta, ouvido.slice(0, 500)));
+  }
+  if (!texto && !arquivo) return responder(de, 'Por enquanto eu entendo texto, áudio e foto do comprovante 🙂 Ex.: "gastei 45 no mercado no pix".');
   if (!arquivo) return responder(de, await lancar(sql, conta, texto.slice(0, 500)));
 
   const midia = await baixarMidia(arquivo.id);
