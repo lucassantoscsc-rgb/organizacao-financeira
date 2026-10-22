@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 68;
+const APP_VERSAO = 69;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1790,6 +1790,8 @@ async function rodarPrimeiraSync(modo){
 // Sincroniza ao abrir o app, ao voltar para ele e quando a internet volta.
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') agendarSync(800); });
 window.addEventListener('online', () => agendarSync(800));
+// Com o app aberto na tela, confere a cada minuto: o que chegou pelo WhatsApp aparece sem precisar recarregar.
+setInterval(() => { if (document.visibilityState === 'visible' && !syncRodando) agendarSync(0); }, 60000);
 
 /* ---------- categorias do cliente ---------- */
 let catEd = null;   // categoria sendo criada/editada: { i (índice em S.catsExtras ou -1), emoji, ess }
