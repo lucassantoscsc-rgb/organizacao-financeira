@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 71;
+const APP_VERSAO = 72;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -638,21 +638,25 @@ function comprometidoFuturo(){
 }
 
 /* ---------- recorrência ----------
-   Ao abrir um mês novo (vazio), copia as contas fixas e as entradas marcadas
-   como "repete todo mês" do mês anterior. Vale até o mês que vem. */
+   Ao abrir um mês novo, copia do mês anterior as contas fixas e as entradas e os gastos marcados como
+   "repete todo mês" (assinaturas, mensalidades). Vale até o mês que vem. Roda uma vez por mês (M.auto), mesmo que o
+   mês já tenha algo (uma parcela, um gasto com data futura); o que já existe com o mesmo nome não é copiado de novo. */
 function aplicarRecorrentes(y,m){
   const k = key(y,m), lim = key(nextYM(hoje.getFullYear(),hoje.getMonth()).y, nextYM(hoje.getFullYear(),hoje.getMonth()).m);
   if (k > lim) return;
   const M0 = S.meses[k];
-  if (M0 && (M0.auto || temDados(M0))) return;
+  if (M0 && M0.auto) return;
   const p = prevYM(y,m), Mp = S.meses[key(p.y,p.m)];
   if (!Mp) return;
-  const fixas = Mp.entradas.filter(e=>e.fixa);
-  if (!fixas.length && !Mp.contas.length) return;
+  const fixas = Mp.entradas.filter(e=>e.fixa), gFixos = Mp.gastos.filter(g=>g.fixa);
+  if (!fixas.length && !gFixos.length && !Mp.contas.length) return;
   const M = mes(y,m,true); M.auto = true;
   const dia = (d) => d ? key(y,m)+'-'+String(Math.min(+d.slice(8,10), diasNoMes(y,m))).padStart(2,'0') : '';
-  fixas.forEach(e => M.entradas.push({ id:uid(), nome:e.nome, valor:e.valor, fixa:true, data:dia(e.data) }));
-  Mp.contas.forEach(c => M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'' }));
+  const tem = (lista, x, f) => lista.some(o => f(o) === f(x));
+  fixas.forEach(e => { if (!tem(M.entradas, e, o=>o.nome)) M.entradas.push({ id:uid(), nome:e.nome, valor:e.valor, fixa:true, data:dia(e.data) }); });
+  gFixos.forEach(g => { if (!tem(M.gastos, g, o=>o.cat+'|'+(o.desc||'')+'|'+!!o.fixa))
+    M.gastos.push({ id:uid(), cat:g.cat, forma:g.forma, valor:g.valor, data:dia(g.data), essencial:g.essencial, desc:g.desc, parcelas:1, cartao:g.cartao, tags:g.tags, fixa:true }); });
+  Mp.contas.forEach(c => { if (!tem(M.contas, c, o=>o.nome)) M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'' }); });
   salvar();
 }
 
@@ -3160,7 +3164,7 @@ function telaLanc(){
       h += `<${tag}><div class="ic">💳</div><div class="tx"><div class="t1">Fatura ${f.cartao?esc(f.cartao.nome):'do crédito'} <span class="tag auto">automático</span></div><div class="t2">${f.cartao?`Vence dia ${f.cartao.vencimento} · toque para ver as compras`:`Crédito usado em ${MESES[prevYM(cur.y,cur.m).m]}`}</div></div><div class="val num down">${brl(f.valor)}</div></${tag.split(' ')[0]}>`; });
     gs.forEach(g=>{
       const parc = ehParcelado(g);
-      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
+      h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.fixa?'<span class="tag auto">🔁 todo mês</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`; });
     parcOutras.forEach(x=>{
       h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
@@ -3455,7 +3459,7 @@ function abrirForm(tipo, id, mk, opcoes){
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
   if (tipo==='gastos'){
-    form.v = { cat: it?it.cat:'', forma: it?it.forma:'Pix / Dinheiro', essencial: it?!!it.essencial:true, parcelas: it?(+it.parcelas||1):1,
+    form.v = { cat: it?it.cat:'', forma: it?it.forma:'Pix / Dinheiro', essencial: it?!!it.essencial:true, parcelas: it?(+it.parcelas||1):1, fixa: it?!!it.fixa:false,
       cartao: it ? it.cartao : (cartaoPorId(S.ultimoCartao) ? S.ultimoCartao : ((S.cartoes||[])[0]||{}).id) };
     const rec = it ? [] : recentes();
     abrir(`${topo}${it?'':blocoFrase()}<h2>${it?'Editar':'Novo'} gasto</h2>
@@ -3467,6 +3471,7 @@ function abrirForm(tipo, id, mk, opcoes){
           <button type="button" class="btn sec mini" data-act="divCatsMais">+ Outra categoria</button><div class="note" id="divCatsInfo"></div></div>`}</div>
       <div class="f"><label>Forma de pagamento</label>${chips('forma',FORMAS,form.v.forma)}</div>
       <div class="f" id="boxCartao" ${form.v.forma==='Crédito' && (S.cartoes||[]).length?'':'hidden'}><label>Cartão</label>${chips('cartao', (S.cartoes||[]).map(c=>c.nome), (cartaoPorId(form.v.cartao)||{}).nome)}</div>
+      <div class="switch f" id="boxFixo" ${form.v.parcelas>1?'hidden':''}><span>🔁 Repete todo mês <small class="muted">(assinatura, mensalidade)</small></span><button type="button" class="tg ${form.v.fixa?'on':''}" data-act="tgFixo" aria-label="Repete todo mês"></button></div>
       <div class="f" id="boxParc" ${form.v.forma==='Crédito'?'':'hidden'}><label>Parcelas</label><select id="fParc">${Array.from({length:24},(_,i)=>i+1).map(n=>`<option value="${n}" ${n===form.v.parcelas?'selected':''}>${n===1?'À vista (1x)':n+'x'}</option>`).join('')}</select><div class="note" id="parcInfo"></div></div>
       ${it ? (it.dividido ? `<p class="note">👥 Dividido com ${esc(it.dividido.join(', '))} · sua parte ${brl(it.minha)}</p>` : '') : `
       <div class="switch f"><span>👥 Dividir este gasto</span><button type="button" class="tg" data-act="tgDividir" aria-label="Dividir"></button></div>
@@ -3523,6 +3528,7 @@ function infoEntParc(){
 function infoParcelas(){
   const el = document.getElementById('parcInfo'); if (!el || !form) return;
   const n = +(document.getElementById('fParc')||{}).value || 1, v = parseValor((document.getElementById('fValor')||{}).value);
+  const bf = document.getElementById('boxFixo'); if (bf) bf.hidden = form.v.forma==='Crédito' && n > 1;   // parcelado não repete
   const data = (document.getElementById('fData')||{}).value || dataPadrao(), c = cartaoPorId(form.v.cartao), pg = mesPagamento(data, key(cur.y,cur.m), c);
   const quando = c ? `na fatura que vence em ${fmtData(vencFatura(c, pg.y, pg.m))}` : `na fatura de ${MESES[pg.m]}`;
   el.textContent = form.v.forma!=='Crédito' ? '' : n>1 && v ? `${n}x de ${brl(v/n)} · a primeira entra ${quando}` : `Entra ${quando}`;
@@ -3575,7 +3581,8 @@ function salvarForm(){
     const cartao = v.forma==='Crédito' && cartaoPorId(v.cartao) ? v.cartao : undefined;
     if (cartao) S.ultimoCartao = cartao;
     const tags = tagsDe(g('fTags'));
-    obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao, tags: tags.length ? tags : undefined };
+    obj = { cat:v.cat, forma:v.forma, valor, data:g('fData'), essencial:v.essencial, desc:g('fDesc'), parcelas, cartao, tags: tags.length ? tags : undefined,
+      fixa: v.fixa && parcelas === 1 ? true : undefined };
     if (!id && v.partes){
       if (v.dividir) return toast('Divida entre categorias ou entre pessoas, uma coisa por vez');
       const ps = v.partes.filter(p => p.valor > 0);
@@ -3897,6 +3904,7 @@ document.addEventListener('click', e=>{
   }
   else if (a==='divCatsMais'){ form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
   else if (a==='divCatsTirar'){ form.v.partes.splice(+t.dataset.i, 1); if (!form.v.partes.length) form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
+  else if (a==='tgFixo'){ form.v.fixa = !form.v.fixa; t.classList.toggle('on', form.v.fixa); if (form.v.fixa) toast('Este gasto vai aparecer sozinho nos próximos meses 🔁'); }
   else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
   else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
   else if (a==='editarReceber'){ novoAReceber(t.dataset.id); }
