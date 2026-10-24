@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 76;
+const APP_VERSAO = 77;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2543,7 +2543,7 @@ function variacao(atual, anterior, menorMelhor){
 // últimos lançamentos. Gráficos, fluxo, orçamentos, assinaturas e cofrinhos ficam na Análise do mês.
 function telaResumo(){
   const C = calc(cur.y,cur.m);
-  const avisos = [cardNavegadorInterno, cardPassos, alertasContas, cardConvitePlus, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
+  const avisos = [cardNavegadorInterno, cardProteger, cardPassos, alertasContas, cardConvitePlus, () => alertasOrcamento(C), lembreteBackup, cardSemana, cardOrganizar, () => cardRendaVariavel(C),
     cardRetro, cardTagAtiva, cardIndique, dicaTransferir, () => !S.listaDispensada && !precisaBackup() ? cardConectado() : ''];
   let aviso = '';
   for (const f of avisos){ aviso = f(); if (aviso) break; }
@@ -2797,6 +2797,19 @@ function navegadorInterno(){
   if (/iphone|ipad|ipod/i.test(ua) && /AppleWebKit/.test(ua) && !/Safari\//.test(ua)) return 'app de e-mail';
   return '';
 }
+// Navegação privada: o que for salvo some ao fechar a aba. No Safari, o armazenamento de arquivos do navegador
+// (navigator.storage.getDirectory) falha nesse modo; o resultado fica em navPrivada para as telas usarem.
+let navPrivada = false;
+function conferirNavPrivada(){
+  try {
+    if (!navigator.storage || !navigator.storage.getDirectory) return;
+    navigator.storage.getDirectory().then(() => {}, (e) => {
+      if (/unknown transient reason|security/i.test(String(e && e.message || e))){ navPrivada = true; if (!ocupado()) render(); }
+    });
+  } catch(e){}
+}
+const blocoNavPrivada = () => `<div class="dica-ios" style="border-color:#fca5a5;background:rgba(252,165,165,.14)"><b>⚠️ Você está na navegação privada</b>
+  <p style="margin:6px 0 0">Nesse modo, tudo o que você anotar <b>some quando fechar a aba</b>. Feche esta aba e abra o Tino numa aba normal do Safari (ou pelo ícone na tela de início).</p></div>`;
 function blocoNavegadorInterno(onde){
   const android = /android/i.test(navigator.userAgent);
   return `<div class="dica-ios" style="border-color:#fcd34d;background:rgba(252,211,77,.14)"><b>⚠️ Você abriu o Tino dentro do ${esc(onde)}</b>
@@ -2805,7 +2818,15 @@ function blocoNavegadorInterno(onde){
       : `<ol><li>Toque em <b>Copiar link</b> abaixo.</li><li>Abra o <b>Safari</b> e cole na barra de endereço.</li><li>No Safari, siga as instruções para instalar.</li></ol>`}
     <button class="btn sec" data-act="copiarLinkApp" style="margin-top:8px">Copiar link</button></div>`;
 }
+// Logo depois dos primeiros lançamentos, oferece o backup na nuvem com destaque (os dados ficam só no aparelho).
+function cardProteger(){
+  if (DEMO || !S.conta || lerNuvem() || syncLigada() || (S.novosDesdeBackup||0) < 3) return '';
+  if (S.backupAdiado && diasDesde(S.backupAdiado) < 3) return '';
+  return `<div class="alert info backup"><span>☁️</span><div><b>Proteja o que você já anotou</b><br>Seus dados ficam só neste aparelho. Ative o backup na nuvem: se trocar de celular ou o navegador apagar algo, você recupera tudo com seu e-mail e uma senha.
+    <div class="acts"><button class="btn pri" data-act="nuvemAtivar">☁️ Ativar backup na nuvem</button></div><button class="link-sutil" data-act="adiarBackup">Depois</button></div></div>`;
+}
 function cardNavegadorInterno(){
+  if (navPrivada && !DEMO) return `<div class="alert crit"><span>⚠️</span><div><b>Você está na navegação privada</b><br>O que você anotar aqui <b>some quando fechar a aba</b>. Abra o Tino numa aba normal do Safari ou pelo ícone da tela de início.</div></div>`;
   const onde = DEMO || S.navInternoFechado ? '' : navegadorInterno();
   if (!onde) return '';
   const android = /android/i.test(navigator.userAgent);
@@ -4267,6 +4288,7 @@ function renderAcesso(){
     <img class="logo" src="icons/icon-192.png" alt="">
     <h1>${esc(CONFIG.nomeApp)}</h1>
     <p class="slogan">${esc(CONFIG.slogan)}</p>
+    ${navPrivada ? blocoNavPrivada() : ''}
     ${interno ? blocoNavegadorInterno(interno) + '<p style="margin-top:18px">Prefere continuar aqui mesmo? Digite o e-mail da compra:</p>'
     : iosNavegador ? `<div class="dica-ios"><b>📲 Instale antes de entrar</b>
       <ol><li>Toque em <b>Compartilhar</b> <span class="kbd">⬆︎</span> ${/CriOS/.test(navigator.userAgent)?'ao lado do endereço':'na barra de baixo'}.</li>
@@ -4364,6 +4386,7 @@ function iniciarApp(){
   setTimeout(backupAutomatico, 4000);
   agendarSync(1500);
   setTimeout(conferirConvitePlus, 2000);
+  conferirNavPrivada();
   // Pede ao navegador para não apagar os dados do Tino quando faltar espaço (vale sobretudo no Android/Chrome).
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch(e){}
 }
