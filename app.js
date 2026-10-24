@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 75;
+const APP_VERSAO = 76;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -4364,6 +4364,8 @@ function iniciarApp(){
   setTimeout(backupAutomatico, 4000);
   agendarSync(1500);
   setTimeout(conferirConvitePlus, 2000);
+  // Pede ao navegador para não apagar os dados do Tino quando faltar espaço (vale sobretudo no Android/Chrome).
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch(e){}
 }
 if (TESTE && !DEMO){
   document.body.classList.add('demo');

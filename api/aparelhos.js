@@ -35,7 +35,7 @@ module.exports = async (req, res) => {
       aparelhos.splice(aparelhos.indexOf(id), 1);
       delete info[id];
     }
-    await redis('HSET', 'usos', conta, JSON.stringify({ aparelhos, em: u.em || agora, info }));
+    await redis('HSET', 'usos', conta, JSON.stringify({ ...u, aparelhos, em: u.em || agora, info }));
 
     const max = Math.max(1, parseInt(process.env.MAX_APARELHOS, 10) || 3);
     const lista = aparelhos.map((id) => ({

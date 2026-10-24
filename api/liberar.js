@@ -1,9 +1,12 @@
 // Confere o acesso no servidor (Vercel).
 // Aceita o e-mail da compra (cadastrado automaticamente pela Cakto em api/cakto.js)
 // ou um código criado em /admin.html. Cada um libera até MAX_APARELHOS aparelhos (padrão 3).
-// No iPhone, o app instalado na tela de início conta como um aparelho separado do Safari.
+// No iPhone, o app instalado na tela de início conta como um aparelho separado do Safari (e o navegador de dentro do
+// Gmail ou do Instagram também). Por isso, com o limite cheio, o aparelho usado há mais tempo é liberado sozinho
+// (até TROCAS_MES vezes em 30 dias); os dados dele continuam guardados nele. Só depois disso o acesso é bloqueado.
 // ACCESS_CODES (opcional): códigos fixos, sem limite de aparelhos, separados por vírgula.
 const { redis, normalizar } = require('./_db');
+const TROCAS_MES = 3;
 
 module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ ok: false });
@@ -35,10 +38,21 @@ module.exports = async (req, res) => {
     if (aparelhos.includes(aparelho) || aparelhos.length < max) {
       if (!aparelhos.includes(aparelho)) aparelhos.push(aparelho);
       info[aparelho] = { ...(info[aparelho] || { em: agora }), nome, visto: agora };
-      await redis('HSET', 'usos', codigo, JSON.stringify({ aparelhos, em: atual.em || agora, info }));
+      await redis('HSET', 'usos', codigo, JSON.stringify({ ...atual, aparelhos, em: atual.em || agora, info }));
       return res.status(200).json({ ok: true });
     }
-    res.status(409).json({ ok: false, erro: `Este acesso já está em ${max} aparelhos. Entre num deles e remova um em Ajustes → Conta → Aparelhos conectados, ou fale com o suporte.` });
+    // Limite cheio: troca o aparelho visto há mais tempo pelo novo, se ainda houver trocas no mês.
+    const trocas = (atual.trocas || []).filter((t) => Date.now() - new Date(t).getTime() < 30 * 864e5);
+    if (trocas.length < TROCAS_MES) {
+      const visto = (a) => (info[a] && (info[a].visto || info[a].em)) || '';
+      const velho = [...aparelhos].sort((a, b) => visto(a).localeCompare(visto(b)))[0];
+      const novos = aparelhos.filter((a) => a !== velho).concat(aparelho);
+      delete info[velho];
+      info[aparelho] = { nome, em: agora, visto: agora };
+      await redis('HSET', 'usos', codigo, JSON.stringify({ ...atual, aparelhos: novos, info, trocas: trocas.concat(agora) }));
+      return res.status(200).json({ ok: true, trocou: true });
+    }
+    res.status(409).json({ ok: false, erro: `Este acesso já está em ${max} aparelhos e já trocou de aparelho ${TROCAS_MES} vezes este mês. Fale com o suporte pelo e-mail suporteplanilhass@gmail.com que liberamos para você.` });
   } catch (e) {
     res.status(500).json({ ok: false, erro: 'Erro no servidor. Tente de novo em instantes.' });
   }
