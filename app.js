@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 77;
+const APP_VERSAO = 78;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1437,7 +1437,9 @@ function enviarNps(){
    Código, contagem e link da planilha vêm do servidor (api/indique). No endereço de teste o código é de exemplo. */
 const LINK_INDIQUE = 'https://tinofinancas.com.br/?ref=';   // curto para compartilhar; o redirecionamento mantém o ?ref
 let indique = null;
-function podeIndicar(){ return !DEMO && !!(S.conta || TESTE); }
+// Indique e ganhe pausado em 26/10/2026 (a planilha virou brinde de todo comprador do app). Para voltar: true.
+const INDIQUE_ATIVO = false;
+function podeIndicar(){ return INDIQUE_ATIVO && !DEMO && !!(S.conta || TESTE); }
 function cardIndique(){
   if (!podeIndicar() || S.indiqueOculto || S.indiqueVisto || new Set(S.diasAtivos||[]).size < 5) return '';
   return `<div class="alert info backup"><span>🎁</span><div><b>Indique o Tino e ganhe a planilha</b><br>Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira.
@@ -3399,6 +3401,9 @@ function telaAjustes(){
     <div class="f"><label>Quero ser chamado(a) de</label><input id="pNome" value="${esc(p.nome)}"></div>
     <div class="f"><label>Meus pronomes são</label><select id="pPron">${['Masculinos','Femininos','Neutros'].map(o=>`<option ${o===p.pronome?'selected':''}>${o}</option>`).join('')}</select></div>
     <button class="btn pri" data-act="salvarPerfil">Salvar perfil</button></section>
+  ${S.conta && !DEMO ? `<section class="card"><h3>🎁 Seu brinde</h3>
+    <p class="note" style="margin:0 0 12px">Quem tem o app também ganha a <b>Planilha de Organização Financeira</b>, para usar no computador ou imprimir.</p>
+    <button class="btn sec" data-act="brinde">📊 Abrir a planilha</button></section>` : ''}
   ${podeIndicar() ? `<section class="card"><h3>🎁 Indique e ganhe</h3>
     <p class="note" style="margin:0 0 12px">Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira quando ele comprar.</p>
     <button class="btn pri" data-act="indique">Ver meu convite</button>
@@ -3799,6 +3804,12 @@ document.addEventListener('click', e=>{
   if (a==='syncAgora'){ t.disabled = true; t.textContent = 'Sincronizando…'; syncAgora(undefined, true).then(ok => { toast(ok ? 'Sincronizado ✓' : 'Não foi possível sincronizar agora'); abrirPlus(); }); return; }
   if (a==='syncDesligar'){ if (!confirm('Desligar a sincronização neste aparelho? Seus dados continuam aqui e no servidor.')) return; syncGuardar(null); abrirPlus(); toast('Sincronização desligada neste aparelho'); return; }
   if (a==='indique'){ abrirIndique(); return; }
+  if (a==='brinde'){ t.disabled = true; postIndique({ acao:'brinde' }).then(d => { t.disabled = false;
+      // o link abre num toque da pessoa (abrir sozinho depois da internet é bloqueado no iPhone)
+      if (d && d.ok && d.planilha) abrir(`<h2>🎁 Seu brinde</h2><p class="note" style="margin:-4px 0 14px">A Planilha de Organização Financeira abre no Google Planilhas.</p>
+        <a class="btn pri" href="${esc(d.planilha)}" target="_blank" rel="noopener">📊 Abrir a planilha</a>`);
+      else toast('Não encontramos o brinde para este e-mail. Fale com o suporte.'); })
+    .catch(() => { t.disabled = false; toast('Sem conexão. Tente de novo.'); }); return; }
   if (a==='indiqueOcultar'){ S.indiqueOculto = true; salvar(); render(); return; }
   if (a==='indiqueEnviar'){ const txt = textoConvite();
     if (navigator.share) navigator.share({ text: txt }).catch(()=>{});

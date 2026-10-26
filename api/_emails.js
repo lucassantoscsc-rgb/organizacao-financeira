@@ -36,7 +36,7 @@ const instalar = `<p style="margin:16px 0 6px"><b>Para deixar o ícone na tela d
   <p style="margin:0 0 6px">🤖 <b>Android:</b> abra o link no <b>Chrome</b>, toque nos <b>três pontinhos</b> e depois em <b>Instalar app</b>.</p>`;
 
 const MODELOS = {
-  d0: (email, nome) => ({
+  d0: (email, nome, extra = {}) => ({
     assunto: 'Seu acesso ao Tino está liberado ✅',
     html: layout(email, `${nome ? 'Oi, ' + esc(nome) + '! ' : ''}Seu acesso está liberado ✅`, `
       <p style="margin:0 0 16px">Obrigado por comprar o Tino Finanças. Para começar, são só 3 passos:</p>
@@ -44,6 +44,7 @@ const MODELOS = {
       ${passo(2, `Entre com este e-mail: <b>${esc(email)}</b>`)}
       ${passo(3, 'Responda as perguntas do começo e siga os primeiros passos da tela inicial.')}
       ${instalar}
+      ${extra.planilha ? `<p style="margin:16px 0 0;padding:12px 14px;background:#fdf4d3;border-radius:12px;font-size:15px">🎁 <b>Seu brinde: a Planilha de Organização Financeira.</b> Para usar no computador ou imprimir. <a href="${extra.planilha}" style="color:#0d9668;font-weight:bold">Abrir a planilha</a> (ela também fica no app, em Ajustes).</p>` : ''}
       <p style="margin:16px 0 0;padding:12px 14px;background:#fef3e2;border-radius:12px;font-size:15px">⚠️ O Tino <b>não fica na App Store nem na Play Store</b>. Não precisa baixar nenhum outro app (o app da Cakto, por exemplo, é só para quem vende). Você usa o Tino pelo link acima.</p>`,
       ['Abrir o Tino', APP]) }),
   d1_entrar: (email, nome) => ({
@@ -79,13 +80,15 @@ const MODELOS = {
       <p style="margin:0 0 14px">${nome ? esc(nome) + ', você' : 'Você'} já está há uma semana com o Tino. Experimente estas:</p>
       <p style="margin:0 0 12px">🤔 <b>Posso comprar?</b> Antes de uma compra maior, digite o valor e veja se cabe no seu mês, à vista ou parcelado.</p>
       <p style="margin:0 0 12px">🎯 <b>Cofrinhos.</b> Crie um para cada sonho (viagem, reserva, carro). O Tino diz quanto guardar por mês para chegar lá.</p>
-      <p style="margin:0 0 12px">🎁 <b>Indique e ganhe.</b> Seu amigo paga R$ 20 em vez de R$ 27, e você ganha a Planilha de Organização Financeira. Fica em Ajustes.</p>`,
+      <p style="margin:0 0 12px">🎁 <b>Sua planilha de brinde.</b> Quem tem o app também ganha a Planilha de Organização Financeira, para usar no computador ou imprimir. Fica em Ajustes → Seu brinde.</p>`,
       ['Abrir o Tino', APP]) }),
 };
 
 async function enviarEmail(para, modelo, nome) {
   if (!process.env.RESEND_API_KEY) throw new Error('E-mail não configurado');
-  const { assunto, html } = MODELOS[modelo](para, nome);
+  // o de boas-vindas leva o link da planilha de brinde (o mesmo configurado no painel admin)
+  const extra = modelo === 'd0' ? { planilha: await require('./indique').config().then((c) => c.planilha).catch(() => '') } : {};
+  const { assunto, html } = MODELOS[modelo](para, nome, extra);
   const r = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, 'Content-Type': 'application/json' },

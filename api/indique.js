@@ -83,6 +83,13 @@ module.exports = async (req, res) => {
       return res.json({ ok: true, codigo, amigos: n, cupom: cfg.cupom, planilha: n > 0 ? cfg.planilha : '', indicado: !!quem });
     }
 
+    // Brinde: quem comprou o app recebe a Planilha de Organização Financeira (o mesmo link entregue na Cakto).
+    if (acao === 'brinde') {
+      const compra = JSON.parse((await redis('HGET', 'codigos', conta)) || 'null');
+      if (!compra) return res.json({ ok: false });
+      return res.json({ ok: true, planilha: (await config()).planilha });
+    }
+
     if (acao === 'usar') {
       // O amigo informa no app o código de quem indicou (até 30 dias depois da compra).
       const codigo = String(cod || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
@@ -102,4 +109,5 @@ module.exports = async (req, res) => {
   }
 };
 module.exports.creditar = creditar;
+module.exports.config = config;
 module.exports.desfazer = desfazer;
