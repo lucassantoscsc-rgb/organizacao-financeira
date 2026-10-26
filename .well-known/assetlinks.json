@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "br.com.tinofinancas.app",
+      "sha256_cert_fingerprints": [
+        "4F:5B:71:3B:AD:52:99:03:3A:C8:4A:80:0F:F7:C6:72:13:60:10:FC:35:97:3F:9A:13:50:47:35:BB:58:00:1B",
+        "FD:BB:11:BB:F6:B4:25:DD:BD:C9:51:76:9D:D8:33:7D:81:9D:83:82:53:37:88:54:72:E2:37:2B:75:31:8A:3A"
+      ]
+    }
+  }
+]
