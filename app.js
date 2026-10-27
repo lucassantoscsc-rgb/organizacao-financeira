@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 79;
+const APP_VERSAO = 80;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2509,7 +2509,8 @@ const ICON = {
   ajustes:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>',
   olho:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   olhoFechado:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18M10.6 5.1A10.4 10.4 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.9 8.3 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.5 4.5-1.2M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
-  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>'
+  plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+  engrenagem:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
 };
 
 function render(){
@@ -2523,6 +2524,7 @@ function render(){
   const telas = { resumo:telaResumo, analise:telaAnalise, lanc:telaLanc, contas:telaContas, metas:telaMetas, ajustes:telaAjustes };
   $app.innerHTML = `
     <header class="top ${aba==='resumo'?'hero-top':''}">
+      <button class="engr${aba==='ajustes'?' on':''}" data-tab="ajustes" aria-label="Ajustes">${ICON.engrenagem}</button>
       <button class="olho" data-act="olho" aria-label="${S.ocultar?'Mostrar valores':'Esconder valores'}" aria-pressed="${!!S.ocultar}">${S.ocultar ? ICON.olhoFechado : ICON.olho}</button>
       <div class="hello">Olá, ${esc(p.nome||'você')}!${sequenciaAtual()>=1?`<button class="streak" data-tab="metas" aria-label="Sequência de ${sequenciaAtual()} dias">🔥 ${sequenciaAtual()}</button>`:''}</div>
       ${aba==='resumo' || aba==='analise' ? '' : `<div class="sub">${saud} de volta</div>`}
@@ -4243,7 +4245,7 @@ const PASSOS_TOUR = [
   { aba:'resumo', sel:'#passos', titulo:'Seus primeiros passos',
     texto:'Siga estes 4 passos para o app começar a trabalhar por você. Cada um leva menos de um minuto.' },
   { aba:'resumo', titulo:'🎉 Tudo pronto!',
-    texto:'O resto você descobre com calma, nas abas lá embaixo. Se precisar, a ajuda fica em <b>Ajustes</b>.', final:true }
+    texto:'O resto você descobre com calma, nas abas lá embaixo. Se precisar, a ajuda fica em <b>Ajustes</b>, na engrenagem ⚙️ lá em cima.', final:true }
 ];
 let tour = null;
 function iniciarTour(){ tour = 0; mostrarPasso(); }
