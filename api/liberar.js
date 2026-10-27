@@ -6,6 +6,7 @@
 // (até TROCAS_MES vezes em 30 dias); os dados dele continuam guardados nele. Só depois disso o acesso é bloqueado.
 // ACCESS_CODES (opcional): códigos fixos, sem limite de aparelhos, separados por vírgula.
 const { redis, normalizar } = require('./_db');
+const { acessoPlayAtivo } = require('./_play');
 const TROCAS_MES = 3;
 
 module.exports = async (req, res) => {
@@ -23,6 +24,8 @@ module.exports = async (req, res) => {
       return res.status(401).json({ ok: false, erro: codigo.includes('@')
         ? 'Não encontramos uma compra com este e-mail. Confira se é o mesmo usado na compra.'
         : 'Código inválido' });
+    if (!(await acessoPlayAtivo(codigo)))
+      return res.status(402).json({ ok: false, erro: 'Sua assinatura do Google Play terminou. Assine de novo para continuar.' });
     if (!aparelho) return res.status(400).json({ ok: false, erro: 'Atualize o app e tente de novo' });
 
     const max = Math.max(1, parseInt(process.env.MAX_APARELHOS, 10) || 3);

@@ -2,6 +2,7 @@
 // Só responde para quem manda um aparelho que já está liberado nessa conta.
 const crypto = require('crypto');
 const { redis, normalizar } = require('./_db');
+const { acessoPlayAtivo } = require('./_play');
 
 const apelido = (id) => crypto.createHash('sha256').update(id).digest('hex').slice(0, 12);
 
@@ -19,6 +20,7 @@ module.exports = async (req, res) => {
   try {
     if (!(await redis('HEXISTS', 'codigos', conta)))
       return res.status(403).json({ ok: false, motivo: 'sem-acesso' });
+    if (!(await acessoPlayAtivo(conta))) return res.status(403).json({ ok: false, motivo: 'assinatura' });
     const u = JSON.parse((await redis('HGET', 'usos', conta)) || '{}');
     const aparelhos = u.aparelhos || (u.aparelho ? [u.aparelho] : []);
     const info = u.info || {};

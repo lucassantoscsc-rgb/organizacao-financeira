@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 78;
+const APP_VERSAO = 79;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -84,6 +84,14 @@ if (TESTE && !DEMO) CONFIG.exigirCodigo = false;
 const LINK_COMPRA = 'https://www.tinofinancas.com.br';
 // Checkout da assinatura do Tino Plus na Cakto (preço normal e preço de fundador, para quem tem o vitalício)
 const LINK_PLUS = 'https://pay.cakto.com.br/gtsweyx_1229875', LINK_PLUS_FUNDADOR = 'https://pay.cakto.com.br/33zgojc';
+// App Android (Google Play): abre com ?origem=android. Lá a venda é pela assinatura da loja (Play Billing)
+// e o app não pode mostrar links de compra de fora; quem já comprou pelo site entra com o e-mail normalmente.
+const ANDROID = (() => {
+  let a = new URLSearchParams(location.search).get('origem') === 'android' || /^android-app:\/\/br\.com\.tinofinancas\.app/.test(document.referrer);
+  try { if (a) localStorage.setItem('tinoLoja', 'android'); else a = localStorage.getItem('tinoLoja') === 'android'; } catch(e){}
+  return a;
+})();
+const PLAY_PRODUTO = 'tino_anual';
 let S;
 try { S = JSON.parse(localStorage.getItem(STORE_KEY)) || novoEstado(); } catch(e){ S = novoEstado(); }
 function migrar(){
@@ -1560,7 +1568,7 @@ function blocoAssinatura(c){
       ${a.status === 'canceled' ? '' : `<p class="note" style="text-align:center;margin:-6px 0 14px"><a href="${cancelar}" style="color:inherit">Cancelar assinatura</a></p>`}`;
   }
   if (c.plusAtivo) return c.fundador ? '<p class="note" style="text-align:center;margin:0 0 14px">🌟 Você é fundador: tem preço especial no Plus.</p>' : '';
-  const link = c.fundador ? LINK_PLUS_FUNDADOR : LINK_PLUS;
+  const link = ANDROID ? '' : c.fundador ? LINK_PLUS_FUNDADOR : LINK_PLUS;
   return `<h3 style="margin:4px 0 8px">O que você ganha com o Plus</h3>
     <p class="note" style="margin:0 0 8px">🔄 <b>Seus dados em todos os aparelhos</b>, salvos no servidor. Trocou de celular, nada se perde.</p>
     <p class="note" style="margin:0 0 8px">💬 <b>Tino no WhatsApp:</b> anote gastos por texto, foto do comprovante ou áudio, e pergunte "quanto posso gastar hoje?".</p>
@@ -3995,6 +4003,10 @@ document.addEventListener('click', e=>{
     editarCofrinho(null, { nome, emoji:'🎯', alvo:valor, prazo:key(q.y,q.m) });
   }
   else if (a==='verTour'){ aba = 'resumo'; render(); iniciarTour(); }
+  else if (a==='playAssinar') assinarPlay();
+  else if (a==='playRestaurar') restaurarPlay();
+  else if (a==='playEmail') renderAcessoAndroid(true);
+  else if (a==='playVoltar') renderAcessoAndroid();
   else if (a==='liberar'){
     const c = document.getElementById('aCod').value.trim();
     if (!c) return toast('Digite o e-mail da compra');
@@ -4028,6 +4040,7 @@ function verificarAcesso(){
   apiAparelhos({ acao:'verificar' }).then(({status,d}) => {
     if (status === 403) desconectar(d.motivo === 'removido'
       ? 'Este aparelho foi removido da sua conta. Para usar aqui de novo, entre com seu e-mail.'
+      : d.motivo === 'assinatura' ? 'Sua assinatura do Google Play terminou. Seus dados continuam guardados neste aparelho: assine de novo para voltar a usar.'
       : 'Seu acesso não está mais ativo. Se acha que é um engano, fale com o suporte.');
     else if (d && d.ok){ S.verificadoEm = new Date().toISOString(); salvar(); }
   }).catch(()=>{});
@@ -4291,6 +4304,7 @@ function renderOnboarding(){
   </div></div>`;
 }
 function renderAcesso(){
+  if (ANDROID) return renderAcessoAndroid();
   // No iPhone, o app instalado na tela de início não enxerga o que foi feito no Safari (são separados).
   // Por isso orientamos a instalar antes de liberar.
   const iosNavegador = /iphone|ipad|ipod/i.test(navigator.userAgent) && !navigator.standalone && !matchMedia('(display-mode: standalone)').matches;
@@ -4311,6 +4325,80 @@ function renderAcesso(){
     <button class="btn pri" data-act="liberar">Liberar acesso</button>
   </div></div>`;
 }
+
+// Tela de entrada do app Android: assinar pelo Google Play (7 dias grátis) ou entrar com o e-mail da compra no site.
+function renderAcessoAndroid(email){
+  const p = precoPlay;
+  $app.innerHTML = `<div class="onb"><div class="in">
+    <img class="logo" src="icons/icon-192.png" alt="">
+    <h1>${esc(CONFIG.nomeApp)}</h1>
+    <p class="slogan">${esc(CONFIG.slogan)}</p>
+    ${navPrivada ? blocoNavPrivada() : ''}
+    ${email ? `<p>Digite o e-mail que você usou na compra para entrar.</p>
+      <div class="f"><label>E-mail da compra (ou código de acesso)</label><input id="aCod" type="email" inputmode="email" autocapitalize="none" autocomplete="email" placeholder="seuemail@exemplo.com"></div>
+      <button class="btn pri" data-act="liberar">Entrar</button>
+      <button class="btn link" data-act="playVoltar">Voltar</button>`
+    : `<div class="ind-cod" style="margin:6px 0 16px"><small>Experimente grátis</small><b style="letter-spacing:0">7 dias</b>
+        <small style="margin-top:4px">Depois, <span style="font-weight:700">${esc(p.ano)} por ano</span> (${esc(p.mes)}/mês).<br>Cancele quando quiser no Google Play.</small></div>
+      <button class="btn pri" data-act="playAssinar">Começar 7 dias grátis</button>
+      <button class="btn sec" data-act="playEmail" style="margin-top:10px">Já tenho acesso: entrar com e-mail</button>
+      <button class="btn link" data-act="playRestaurar">Já assinei pelo Google Play: restaurar</button>
+      <p class="note" style="text-align:center;margin-top:10px">A assinatura renova sozinha a cada ano pelo Google Play, até você cancelar. O teste grátis vale só para a primeira assinatura.</p>`}
+  </div></div>`;
+}
+// Preço mostrado na tela: começa com o da tabela e troca pelo que o Google Play informar (já no formato da loja).
+let precoPlay = { ano:'R$ 118,80', mes:'R$ 9,90' };
+async function servicoPlay(){
+  if (!('getDigitalGoodsService' in window)) throw new Error('sem-play');
+  return window.getDigitalGoodsService('https://play.google.com/billing');
+}
+function carregarPrecoPlay(){
+  servicoPlay().then(svc => svc.getDetails([PLAY_PRODUTO])).then(([d]) => {
+    if (!d || !d.price) return;
+    const v = Number(d.price.value), fmt = (x) => x.toLocaleString('pt-BR', { style:'currency', currency:d.price.currency || 'BRL' });
+    if (!v) return;
+    precoPlay = { ano:fmt(v), mes:fmt(Math.round(v / 12 * 100) / 100) };
+    if (!S.liberado && document.querySelector('[data-act="playAssinar"]')) renderAcessoAndroid();
+  }).catch(() => {});
+}
+async function assinarPlay(){
+  let token;
+  try {
+    await servicoPlay();
+    const pedido = new PaymentRequest([{ supportedMethods:'https://play.google.com/billing', data:{ sku:PLAY_PRODUTO } }],
+      { total:{ label:'Total', amount:{ currency:'BRL', value:'0' } } });
+    const resp = await pedido.show();
+    token = resp.details && resp.details.purchaseToken;
+    await resp.complete('success');
+  } catch(e){
+    if (e && e.name === 'AbortError') return;   // fechou a janela do Google
+    return toast(e && e.message === 'sem-play' ? 'Abra o app baixado pelo Google Play para assinar.' : 'Não foi possível abrir a assinatura. Tente de novo.');
+  }
+  if (token) confirmarPlay(token);
+}
+async function restaurarPlay(){
+  try {
+    const compras = await (await servicoPlay()).listPurchases();
+    const c = compras.find(x => x.itemId === PLAY_PRODUTO);
+    if (!c) return toast('Não achamos uma assinatura nesta conta do Google. Confira se é a mesma conta da compra.');
+    confirmarPlay(c.purchaseToken);
+  } catch(e){ toast('Abra o app baixado pelo Google Play para restaurar.'); }
+}
+// O servidor confere a compra no Google e devolve o código da conta; daí em diante é igual a quem entra com e-mail.
+async function confirmarPlay(token){
+  toast('Confirmando sua assinatura…');
+  try {
+    const r = await fetch('api/play', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ token }) });
+    const d = await r.json();
+    if (!r.ok || !d.ok) return toast(d.erro || 'Não foi possível confirmar a assinatura.');
+    const r2 = await fetch('api/liberar', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ codigo:d.codigo, aparelho:idAparelho(), nome:nomeAparelho() }) });
+    const d2 = await r2.json();
+    if (!r2.ok || !d2.ok) return toast(d2.erro || 'Não foi possível liberar este aparelho.');
+    entrarNaConta(d.codigo);
+    toast('Assinatura confirmada ✓ Bom uso do Tino!');
+  } catch(e){ toast('Sem internet. Conecte-se e toque em "restaurar".'); }
+}
+if (ANDROID && !DEMO) carregarPrecoPlay();
 
 // Atalhos vindos da notificação.
 const parametros = new URLSearchParams(location.search);
@@ -4420,7 +4508,7 @@ if (DEMO){
   if (!new URLSearchParams(location.search).has('embed')){
     document.body.classList.add('demo');
     const barra = document.createElement('div'); barra.id = 'demoBar';
-    barra.innerHTML = `<span>👀 <b>Demonstração</b> com dados de exemplo</span><a href="${LINK_COMPRA}" target="_blank" rel="noopener">Quero o meu</a>`;
+    barra.innerHTML = `<span>👀 <b>Demonstração</b> com dados de exemplo</span>${ANDROID ? '' : `<a href="${LINK_COMPRA}" target="_blank" rel="noopener">Quero o meu</a>`}`;
     document.body.appendChild(barra);
   }
 }
