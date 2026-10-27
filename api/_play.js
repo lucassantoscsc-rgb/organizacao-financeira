@@ -13,7 +13,9 @@ const b64 = (x) => Buffer.from(typeof x === 'string' ? x : JSON.stringify(x)).to
 
 async function tokenGoogle() {
   if (cacheToken && cacheToken.expira > Date.now() + 60e3) return cacheToken.valor;
-  const sa = JSON.parse(process.env.GOOGLE_PLAY_SA || 'null');
+  // Aceita o JSON colado direto ou em base64 (colar o arquivo na Vercel às vezes corta o começo).
+  const bruto = String(process.env.GOOGLE_PLAY_SA || '').trim();
+  const sa = bruto ? JSON.parse(bruto.startsWith('{') ? bruto : Buffer.from(bruto, 'base64').toString('utf8')) : null;
   if (!sa || !sa.private_key) throw new Error('GOOGLE_PLAY_SA não configurada');
   const agora = Math.floor(Date.now() / 1000);
   const corpo = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({
