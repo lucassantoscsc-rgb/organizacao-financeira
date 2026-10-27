@@ -32,7 +32,8 @@ async function tokenGoogle() {
 async function google(caminho, metodo) {
   const r = await fetch('https://androidpublisher.googleapis.com/androidpublisher/v3/applications/' + PACOTE + caminho, {
     method: metodo || 'GET', headers: { Authorization: 'Bearer ' + (await tokenGoogle()) } });
-  if (r.status === 404 || r.status === 410) return null;
+  // 400/404/410: token inválido ou de outro app (não é uma compra do Tino).
+  if (r.status === 400 || r.status === 404 || r.status === 410) return null;
   const txt = await r.text();
   if (!r.ok) throw new Error('Google Play ' + r.status + ': ' + txt.slice(0, 200));
   return txt ? JSON.parse(txt) : {};
