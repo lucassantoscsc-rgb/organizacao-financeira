@@ -33,14 +33,14 @@ function layout(email, titulo, corpo, botao) {
 const passo = (n, txt) => `<p style="margin:0 0 10px"><b style="display:inline-block;width:24px;height:24px;line-height:24px;text-align:center;border-radius:50%;background:#e7f7f0;color:#0d9668;margin-right:6px">${n}</b>${txt}</p>`;
 const instalar = `<p style="margin:16px 0 6px"><b>Para deixar o ícone na tela do celular:</b></p>
   <p style="margin:0 0 6px">📱 <b>iPhone:</b> não toque no link aqui do e-mail (ele abre dentro do app de e-mail, onde não dá para instalar). Abra o <b>Safari</b>, digite <b>${APP.replace('https://', '')}</b>, toque em <b>Compartilhar</b> (quadrado com a seta) e depois em <b>Adicionar à Tela de Início</b>. Use sempre pelo ícone.</p>
-  <p style="margin:0 0 6px">🤖 <b>Android:</b> abra o link no <b>Chrome</b>, toque nos <b>três pontinhos</b> e depois em <b>Instalar app</b>.</p>`;
+  <p style="margin:0 0 6px">🤖 <b>Android:</b> baixe o <b>Tino Finanças</b> no <a href="https://play.google.com/store/apps/details?id=br.com.tinofinancas.app" style="color:#0d9668">Google Play</a>, toque em <b>Já tenho acesso: entrar com e-mail</b> e digite o e-mail da compra. Você <b>não paga a assinatura da loja</b>: seu acesso já é vitalício.</p>`;
 
 const MODELOS = {
   d0: (email, nome, extra = {}) => ({
     assunto: 'Seu acesso ao Tino está liberado ✅',
     html: layout(email, `${nome ? 'Oi, ' + esc(nome) + '! ' : ''}Seu acesso está liberado ✅`, `
       <p style="margin:0 0 16px">Obrigado por comprar o Tino Finanças. Para começar, são só 3 passos:</p>
-      ${passo(1, `Abra o app: <a href="${APP}" style="color:#0d9668">${APP.replace('https://', '')}</a> (no iPhone, pelo <b>Safari</b>: veja abaixo)`)}
+      ${passo(1, `Abra o app: <a href="${APP}" style="color:#0d9668">${APP.replace('https://', '')}</a> (no iPhone, pelo <b>Safari</b>; no Android, pelo <b>Google Play</b>: veja abaixo)`)}
       ${passo(2, `Entre com este e-mail: <b>${esc(email)}</b>`)}
       ${passo(3, 'Responda as perguntas do começo e siga os primeiros passos da tela inicial.')}
       ${instalar}
@@ -51,7 +51,7 @@ const MODELOS = {
     assunto: 'Seu Tino está te esperando',
     html: layout(email, `${nome ? esc(nome) + ', seu' : 'Seu'} Tino está te esperando`, `
       <p style="margin:0 0 14px">Vimos que você ainda não entrou no app. Leva menos de um minuto:</p>
-      ${passo(1, `Abra <a href="${APP}" style="color:#0d9668">${APP.replace('https://', '')}</a> (no iPhone, pelo <b>Safari</b>: veja abaixo)`)}
+      ${passo(1, `Abra <a href="${APP}" style="color:#0d9668">${APP.replace('https://', '')}</a> (no iPhone, pelo <b>Safari</b>; no Android, pelo <b>Google Play</b>: veja abaixo)`)}
       ${passo(2, `Entre com <b>${esc(email)}</b>, o e-mail da compra`)}
       ${instalar}
       <p style="margin:14px 0 0">Se aparecer alguma mensagem de erro, responda este e-mail com um print que a gente resolve.</p>`,
