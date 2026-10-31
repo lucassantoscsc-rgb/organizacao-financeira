@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 80;
+const APP_VERSAO = 81;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -447,32 +447,48 @@ function abrirPessoa(p){
     <div class="row2"><button class="btn pri" data-act="receber" data-ids="${pend.map(r=>r.id).join(',')}">Recebi tudo</button><button class="btn sec" data-act="cobrar" data-pessoa-nome="${esc(p)}">📲 Cobrar</button></div>
     <button class="btn sec" data-act="receberParteAbrir" style="margin-top:10px">Recebi uma parte</button>
     <div id="boxRecParte" hidden style="margin-top:12px"><div class="f"><label>Quanto ${esc(p)} te pagou?</label><input class="money num" id="recParte" inputmode="decimal" placeholder="0,00"></div>
+      ${campoDataRec('recParteData')}
       <p class="note" style="margin:-4px 0 12px">Abate primeiro o que é mais antigo. O que faltar continua pendente.</p>
       <button class="btn pri" data-act="receberParte" data-pessoa-nome="${esc(p)}">Registrar</button></div>
     <div class="f" style="margin-top:12px"><label>Sua chave Pix (vai na mensagem de cobrança)</label><input id="chavePix" placeholder="Opcional: CPF, celular, e-mail…" value="${esc(S.chavePix||'')}" autocomplete="off"></div>` : '<p class="gprev ok">Nada pendente com esta pessoa. 🎉</p>'}
     ${recebidos.length ? `<h4 class="sub-h">Já recebidos</h4><div class="list flat">${recebidos.map(r=>`<div class="item"><div class="tx"><div class="t1">${esc(r.desc)}</div><div class="t2">recebido em ${fmtData(r.recebidoEm)}</div></div><div class="val num up">${brl(r.valor)}</div></div>`).join('')}</div>` : ''}`);
 }
-function receber(ids){
+// A entrada vai para o mês da data em que o dinheiro chegou (pode ser diferente de hoje).
+const lancarRecebido = (p, valor, data) => { if (S.lancarRecebidos === false) return;
+  const o = ymDe(data.slice(0,7)); mes(o.y, o.m, true).entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(valor*100)/100, data, reembolso:true }); };
+const campoDataRec = (id) => `<div class="f"><label>Quando você recebeu?</label><input type="date" id="${id}" value="${dataHoje()}"></div>`;
+// Antes de confirmar, pergunta a data do recebimento.
+function confirmarReceber(ids){
   const rs = (S.aReceber||[]).filter(r => ids.includes(r.id) && !r.recebido); if (!rs.length) return;
-  const hojeTxt = dataHoje(), total = soma(rs, r=>r.valor), p = rs[0].pessoa;
-  rs.forEach(r => { r.recebido = true; r.recebidoEm = hojeTxt; });
-  if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(total*100)/100, data:hojeTxt, reembolso:true }); }
+  const p = rs[0].pessoa;
+  abrir(`<h2>Recebi de ${esc(p)}</h2>
+    <p class="sim-txt">${rs.length === 1 ? esc(rs[0].desc) : rs.length + ' itens'}: <b>${brl(soma(rs, r=>r.valor))}</b></p>
+    ${campoDataRec('recData')}
+    ${S.lancarRecebidos !== false ? '<p class="note" style="margin:-4px 0 12px">Vai entrar nas suas entradas no mês dessa data.</p>' : ''}
+    <button class="btn pri" data-act="receberOk" data-ids="${rs.map(r=>r.id).join(',')}">Confirmar recebimento</button>
+    <button class="btn sec" data-act="voltarPessoa" data-pessoa-nome="${esc(p)}" style="margin-top:10px">Voltar</button>`);
+}
+function receber(ids, data){
+  const rs = (S.aReceber||[]).filter(r => ids.includes(r.id) && !r.recebido); if (!rs.length) return;
+  data = data || dataHoje(); const total = soma(rs, r=>r.valor), p = rs[0].pessoa;
+  rs.forEach(r => { r.recebido = true; r.recebidoEm = data; });
+  lancarRecebido(p, total, data);
   salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(total)} de ${p} ✓`);
 }
 // Recebimento parcial: abate das pendências mais antigas; a que for paga só em parte é dividida em duas
 // (a parte recebida vai para o histórico e o resto continua pendente).
-function receberParte(p, valor){
+function receberParte(p, valor, data){
   const pend = pendentes().filter(r => r.pessoa === p).sort((a,b) => String(a.data||'').localeCompare(String(b.data||'')));
   const total = soma(pend, r => r.valor);
   if (!(valor > 0)) return toast('Digite quanto você recebeu');
   if (valor > total + 0.004) return toast(`${p} te deve ${brl(total)}. Use "Recebi tudo".`);
-  const hojeTxt = dataHoje(); let resto = valor;
+  const hojeTxt = data || dataHoje(); let resto = valor;
   for (const r of pend){
     if (resto <= 0.004) break;
     if (resto >= r.valor - 0.004){ r.recebido = true; r.recebidoEm = hojeTxt; resto = Math.round((resto - r.valor) * 100) / 100; }
     else { S.aReceber.push({ ...r, id:uid(), desc:r.desc + ' (parte)', valor:resto, recebido:true, recebidoEm:hojeTxt, parteDe:r.id }); r.valor = Math.round((r.valor - resto) * 100) / 100; resto = 0; }
   }
-  if (S.lancarRecebidos !== false){ const M = mes(hoje.getFullYear(), hoje.getMonth(), true); M.entradas.push({ id:uid(), nome:`Recebido de ${p}`, valor:Math.round(valor*100)/100, data:hojeTxt, reembolso:true }); }
+  lancarRecebido(p, valor, hojeTxt);
   salvar(); render(); abrirPessoa(p); toast(`Recebido ${brl(valor)} de ${p} ✓`);
 }
 // Com mais de um item pendente, deixa escolher quais entram na mensagem de cobrança.
@@ -3956,12 +3972,13 @@ document.addEventListener('click', e=>{
   else if (a==='divCatsTirar'){ form.v.partes.splice(+t.dataset.i, 1); if (!form.v.partes.length) form.v.partes.push({ cat:'', valor:0 }); desenharPartes(); }
   else if (a==='tgFixo'){ form.v.fixa = !form.v.fixa; t.classList.toggle('on', form.v.fixa); if (form.v.fixa) toast('Este gasto vai aparecer sozinho nos próximos meses 🔁'); }
   else if (a==='tgDividir'){ form.v.dividir = !form.v.dividir; t.classList.toggle('on', form.v.dividir); document.getElementById('boxDividir').hidden = !form.v.dividir; if (form.v.dividir) document.getElementById('fPessoas').focus(); }
-  else if (a==='receber'){ receber(t.dataset.ids.split(',')); }
+  else if (a==='receber'){ confirmarReceber(t.dataset.ids.split(',')); }
+  else if (a==='receberOk'){ const d = document.getElementById('recData').value; if (!d) return toast('Escolha a data do recebimento'); receber(t.dataset.ids.split(','), d); }
   else if (a==='editarReceber'){ novoAReceber(t.dataset.id); }
   else if (a==='voltarPessoa'){ abrirPessoa(t.dataset.pessoaNome); }
   else if (a==='cobrarEnviar'){ cobrar(t.dataset.pessoaNome, [...document.querySelectorAll('[data-cobrar]:checked')].map(c => c.dataset.cobrar)); }
   else if (a==='receberParteAbrir'){ document.getElementById('boxRecParte').hidden = false; t.hidden = true; document.getElementById('recParte').focus(); }
-  else if (a==='receberParte'){ receberParte(t.dataset.pessoaNome, parseValor(document.getElementById('recParte').value)); }
+  else if (a==='receberParte'){ const d = document.getElementById('recParteData').value; if (!d) return toast('Escolha a data do recebimento'); receberParte(t.dataset.pessoaNome, parseValor(document.getElementById('recParte').value), d); }
   else if (a==='excluirReceber'){ const r = (S.aReceber||[]).find(x => x.id === t.dataset.id); if (!r || !confirm(`Excluir "${r.desc}" (${brl(r.valor)}) de ${r.pessoa}?`)) return;
     S.aReceber = S.aReceber.filter(x => x.id !== r.id); salvar(); render(); abrirPessoa(r.pessoa); toast('Excluído'); }
   else if (a==='fatAbrir'){ abrirFatura(t.dataset.c); }
