@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 81;
+const APP_VERSAO = 82;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -207,6 +207,7 @@ const parcelasDoMes = (y,m) => parcelas()[key(y,m)] || [];
    Com cartão: compra até o dia do fechamento entra na fatura daquele mês; depois, na do mês seguinte.
    A fatura é paga no mês do vencimento (mesmo mês do fechamento se o vencimento for depois dele). */
 const cartaoPorId = (id) => (S.cartoes||[]).find(c=>c.id===id);
+const noCartao = (conta) => !!(conta && conta.cartao && cartaoPorId(conta.cartao));
 function mesPagamento(data, kCompra, cartao){
   const o = data ? ymDe(data.slice(0,7)) : ymDe(kCompra);
   if (!cartao || !data) return somaMeses(o.y, o.m, 1);
@@ -224,6 +225,12 @@ function faturas(){
       const n = +g.parcelas, base = Math.floor(g.valor/n*100)/100;
       for (let i=0;i<n;i++){ const a = somaMeses(pg.y, pg.m, i); add(key(a.y,a.m), c ? c.id : null, i===n-1 ? Math.round((g.valor - base*(n-1))*100)/100 : base, g, k, i, n); }
     } else add(key(pg.y,pg.m), c ? c.id : null, +g.valor, g, k, 0, 1);
+  }));
+  // Conta fixa paga no cartão: vira uma compra no dia do vencimento e entra na fatura (não conta de novo nas contas).
+  Object.entries(S.meses).forEach(([k,M]) => (M.contas||[]).forEach(ct => {
+    const c = cartaoPorId(ct.cartao); if (!c) return;
+    const o = ymDe(k), data = k + '-' + String(Math.min(+ct.venc || 1, diasNoMes(o.y,o.m))).padStart(2,'0'), pg = mesPagamento(data, k, c);
+    add(key(pg.y,pg.m), c.id, +(ct.valor || ct.planejado) || 0, { id:ct.id, desc:ct.nome, cat:CAT_CONTAS, data, conta:true }, k, 0, 1);
   }));
   return memoFat;
 }
@@ -603,8 +610,8 @@ function listaCompraFatura(cid){
   const xs = faturasDoMes(cur.y,cur.m).filter(x => x.cartao === cid).sort((a,b) => String(b.g.data||'').localeCompare(String(a.g.data||'')));
   if (!xs.length) return '';
   return `<h4 class="sub-h">🧾 Compras nesta fatura (${xs.length})</h4>
-    <div class="list flat">${xs.map(x => `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div>
-      <div class="tx"><div class="t1">${esc(x.g.desc || nomeCat(x.g.cat))}</div><div class="t2">${x.g.data ? fmtData(x.g.data) : ''}${x.n > 1 ? ` · <span class="tag cr">parcela ${x.i+1}/${x.n}</span>` : ''}</div></div>
+    <div class="list flat">${xs.map(x => `<button class="item" data-edit="${x.g.conta ? 'contas' : 'gastos'}" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div>
+      <div class="tx"><div class="t1">${esc(x.g.desc || nomeCat(x.g.cat))}</div><div class="t2">${x.g.data ? fmtData(x.g.data) : ''}${x.n > 1 ? ` · <span class="tag cr">parcela ${x.i+1}/${x.n}</span>` : ''}${x.g.conta ? ' · <span class="tag auto">conta fixa</span>' : ''}</div></div>
       <div class="val num">${brl(x.valor)}</div></button>`).join('')}</div>
     <p class="note">Toque numa compra para corrigir o valor, trocar o cartão ou excluir.</p>`;
 }
@@ -680,7 +687,7 @@ function aplicarRecorrentes(y,m){
   fixas.forEach(e => { if (!tem(M.entradas, e, o=>o.nome)) M.entradas.push({ id:uid(), nome:e.nome, valor:e.valor, fixa:true, data:dia(e.data) }); });
   gFixos.forEach(g => { if (!tem(M.gastos, g, o=>o.cat+'|'+(o.desc||'')+'|'+!!o.fixa))
     M.gastos.push({ id:uid(), cat:g.cat, forma:g.forma, valor:g.valor, data:dia(g.data), essencial:g.essencial, desc:g.desc, parcelas:1, cartao:g.cartao, tags:g.tags, fixa:true }); });
-  Mp.contas.forEach(c => { if (!tem(M.contas, c, o=>o.nome)) M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'' }); });
+  Mp.contas.forEach(c => { if (!tem(M.contas, c, o=>o.nome)) M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'', ...(c.cartao ? { cartao:c.cartao } : {}) }); });
   salvar();
 }
 
@@ -811,9 +818,9 @@ function vencimentosFuturos(){
   const v = {}, kh = chaveHoje(), hojeTxt = dataHoje();
   const prox = nextYM(hoje.getFullYear(), hoje.getMonth()), kp = key(prox.y, prox.m);
   const add = (k, c) => { const o = ymDe(k), d = k + '-' + String(Math.min(+c.venc, diasNoMes(o.y,o.m))).padStart(2,'0'); if (d >= hojeTxt) v[d] = (v[d]||0) + 1; };
-  (S.meses[kh] ? S.meses[kh].contas : []).filter(c=>!c.pago && c.venc).forEach(c => add(kh, c));
+  (S.meses[kh] ? S.meses[kh].contas : []).filter(c=>!c.pago && c.venc && !noCartao(c)).forEach(c => add(kh, c));
   // mês seguinte: as contas dele, ou as deste mês como modelo (são copiadas quando o mês começa)
-  const modelo = S.meses[kp] && S.meses[kp].contas.length ? S.meses[kp].contas.filter(c=>!c.pago) : (S.meses[kh] ? S.meses[kh].contas : []);
+  const modelo = (S.meses[kp] && S.meses[kp].contas.length ? S.meses[kp].contas.filter(c=>!c.pago) : (S.meses[kh] ? S.meses[kh].contas : [])).filter(c=>!noCartao(c));
   modelo.filter(c=>c.venc).forEach(c => add(kp, c));
   [kh, kp].forEach(k => { const o = ymDe(k); faturasPorCartao(o.y, o.m).forEach(f => { if (f.cartao) add(k, { venc:f.cartao.vencimento }); }); });
   return v;
@@ -1738,8 +1745,8 @@ function agendaParaPlus(){
   const out = [], kh = chaveHoje(), hojeTxt = dataHoje(), prox = nextYM(hoje.getFullYear(), hoje.getMonth()), kp = key(prox.y, prox.m);
   const r2 = (v) => Math.round((+v || 0) * 100) / 100, dia = (k, d) => { const o = ymDe(k); return k + '-' + String(Math.min(+d, diasNoMes(o.y,o.m))).padStart(2,'0'); };
   const add = (x) => { if (x.data >= hojeTxt) out.push(x); };
-  (S.meses[kh] ? S.meses[kh].contas : []).filter(c => !c.pago && c.venc).forEach(c => add({ tipo:'conta', nome:c.nome, valor:r2(c.valor || c.planejado), data:dia(kh, c.venc) }));
-  const modelo = S.meses[kp] && S.meses[kp].contas.length ? S.meses[kp].contas.filter(c => !c.pago) : (S.meses[kh] ? S.meses[kh].contas : []);
+  (S.meses[kh] ? S.meses[kh].contas : []).filter(c => !c.pago && c.venc && !noCartao(c)).forEach(c => add({ tipo:'conta', nome:c.nome, valor:r2(c.valor || c.planejado), data:dia(kh, c.venc) }));
+  const modelo = (S.meses[kp] && S.meses[kp].contas.length ? S.meses[kp].contas.filter(c => !c.pago) : (S.meses[kh] ? S.meses[kh].contas : [])).filter(c => !noCartao(c));
   modelo.filter(c => c.venc).forEach(c => add({ tipo:'conta', nome:c.nome, valor:r2(c.valor || c.planejado), data:dia(kp, c.venc) }));
   [kh, kp].forEach(k => { const o = ymDe(k); faturasPorCartao(o.y, o.m).forEach(f => {
     if (f.cartao && !statusFatura(f.cartao.id, o.y, o.m)) add({ tipo:'fatura', nome:'Fatura ' + f.cartao.nome, valor:r2(f.valor), data:dia(k, f.cartao.vencimento) }); }); });
@@ -2472,9 +2479,10 @@ function calc(y,m){
   const credito = soma(simples.filter(g=>g.forma==='Crédito'), g=>g.valor) + soma(parc, x=>x.valor);
   const debito = soma(simples.filter(g=>g.forma==='Débito'), g=>g.valor);
   const pix = soma(simples.filter(g=>g.forma==='Pix / Dinheiro'), g=>g.valor);
-  const contasPagas = soma(M.contas.filter(c=>c.pago), c=>c.valor);
-  const contasPend = soma(M.contas.filter(c=>!c.pago), c=>c.planejado||c.valor);
-  const contasPlan = soma(M.contas, c=>c.planejado||c.valor);
+  const contasFora = M.contas.filter(c=>!noCartao(c));   // as pagas no cartão contam pela fatura
+  const contasPagas = soma(contasFora.filter(c=>c.pago), c=>c.valor);
+  const contasPend = soma(contasFora.filter(c=>!c.pago), c=>c.planejado||c.valor);
+  const contasPlan = soma(contasFora, c=>c.planejado||c.valor);
   const reservas = soma(M.reservas, r=>r.valor);
   const resEmerg = soma(M.reservas.filter(r=>r.tipo==='Reserva de emergência'), r=>r.valor);
   const resMeta = soma(M.reservas.filter(r=>r.tipo==='Meta'), r=>r.valor);
@@ -2889,7 +2897,7 @@ function lembreteBackup(){
 function alertasContas(){
   if (key(cur.y,cur.m) !== chaveHoje()) return '';
   const M = mes(cur.y,cur.m);
-  const lst = M.contas.map(c=>({c, s:statusConta(c,cur.y,cur.m)})).filter(x=>x.s && x.s.cls);
+  const lst = M.contas.filter(c=>!noCartao(c)).map(c=>({c, s:statusConta(c,cur.y,cur.m)})).filter(x=>x.s && x.s.cls);
   faturasPorCartao(cur.y,cur.m).forEach(f => { if (!f.cartao || statusFatura(f.cartao.id, cur.y, cur.m)) return; const s = statusConta({ pago:false, venc:f.cartao.vencimento }, cur.y, cur.m);
     if (s && s.cls && s.t !== 'atrasada') lst.push({ c:{ nome:'Fatura ' + f.cartao.nome }, s }); });
   if (!lst.length) return '';
@@ -3223,7 +3231,7 @@ function telaLanc(){
       h += `<button class="item" data-edit="gastos" data-id="${g.id}"><div class="ic">${emojiCat(g.cat)}</div><div class="tx"><div class="t1">${esc(g.desc||nomeCat(g.cat))}</div><div class="t2">${esc(g.forma)}${parc?`<span class="tag cr">1/${g.parcelas} de ${brl(g.valor)}</span>`:g.forma==='Crédito'?'<span class="tag cr">fatura</span>':''}${g.fixa?'<span class="tag auto">🔁 todo mês</span>':''}${g.data?' · '+fmtData(g.data):''} · ${g.essencial?'✅':'❌'}${g.dividido?` · 👥 sua parte ${brl(g.minha)}`:g.minha===0?' · 🤝 emprestado':''}${(g.tags||[]).map(t=>` <span class="tag auto">🏷️ ${esc(t)}</span>`).join('')}</div></div><div class="val num">${brl(parc?parcelasDoMes(cur.y,cur.m).find(x=>x.g===g).valor:g.valor)}</div></button>`;  linhas.push({ d: g.data || '', h: h.slice(ini) }); h = h.slice(0, ini); });
     linhas.sort((a,b) => (b.d||'').localeCompare(a.d||'')).forEach(l => h += l.h);
     parcOutras.forEach(x=>{
-      h += `<button class="item" data-edit="gastos" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
+      h += `<button class="item" data-edit="${x.g.conta ? 'contas' : 'gastos'}" data-id="${x.g.id}" data-mk="${x.origem}"><div class="ic">${emojiCat(x.g.cat)}</div><div class="tx"><div class="t1">${esc(x.g.desc||nomeCat(x.g.cat))}</div><div class="t2">Crédito<span class="tag cr">parcela ${x.i+1}/${x.n}</span> · compra em ${MESES[ymDe(x.origem).m].toLowerCase()}</div></div><div class="val num">${brl(x.valor)}</div></button>`; });
     if (!gs.length && !C.faturaAnterior && !parcOutras.length) h += vazio('🧾','Nenhum gasto neste mês','Toque no + para lançar.');
     h += `</div><button class="btn sec" data-act="importarExtrato">📥 Importar extrato do banco</button>`;
   }
@@ -3345,6 +3353,9 @@ function telaContas(){
   const ordem = [...M.contas].sort((a,b)=> (a.pago-b.pago) || ((+a.venc||99)-(+b.venc||99)));
   let h = `<div class="totalrow"><span>Pagas <b class="num">${brl(C.contasPagas)}</b></span><span>Pendentes <b class="num">${brl(C.contasPend)}</b></span></div><div class="list">`;
   ordem.forEach(c=>{
+    if (noCartao(c)){ const cc = cartaoPorId(c.cartao);
+      h += `<div class="item"><div class="ic">💳</div><button class="tx" style="text-align:left" data-edit="contas" data-id="${c.id}"><div class="t1">${esc(c.nome)}</div>
+        <div class="t2">No cartão ${esc(cc.nome)}${c.venc?' · dia '+c.venc:''} · entra na fatura</div></button><div class="val num" style="color:var(--muted)">${brl(c.valor||c.planejado)}</div></div>`; return; }
     const dif = c.pago && c.planejado && Math.abs(c.valor-c.planejado)>0.004;
     const st = statusConta(c,cur.y,cur.m);
     const situacao = c.pago ? 'Paga'+(c.data?' em '+fmtData(c.data):'') : st ? `<span class="tag ${st.cls}">${st.t}</span>` : (c.venc?`Vence dia ${c.venc}`:'Pendente');
@@ -3550,14 +3561,17 @@ function abrirForm(tipo, id, mk, opcoes){
     infoParcelas();
   }
   if (tipo==='contas'){
-    form.v = { pago: it?!!it.pago:false };
+    const cartaoIt = it && cartaoPorId(it.cartao), temCartoes = (S.cartoes||[]).length > 0, OUTRO = 'Boleto, Pix ou débito';
+    form.v = { pago: it?!!it.pago:false, contaCartao: cartaoIt ? cartaoIt.id : '' };
     abrir(`${topo}<h2>${it?'Editar':'Nova'} conta</h2>
       <div class="f"><label>Nome</label><input id="fNome" placeholder="Ex.: Aluguel, Energia, Internet" value="${esc(it?it.nome:'')}"></div>
       <div class="row2"><div class="f"><label>Planejado</label><input class="num" id="fPlan" inputmode="decimal" placeholder="0,00" value="${moneyVal(it&&it.planejado)}"></div>
       <div class="f"><label>Vence dia</label><input class="num" id="fVenc" inputmode="numeric" placeholder="Ex.: 10" value="${it&&it.venc?it.venc:''}"></div></div>
-      <div class="switch f"><span>Já paguei</span><button type="button" class="tg ${form.v.pago?'on':''}" data-act="tgPago"></button></div>
+      ${temCartoes ? `<div class="f"><label>Como você paga</label>${chips('contaCartao', [OUTRO, ...S.cartoes.map(c=>'💳 '+c.nome)], cartaoIt ? '💳 '+cartaoIt.nome : OUTRO)}</div>
+      <p class="note" id="notaContaCartao" style="margin:-4px 0 12px" ${cartaoIt?'':'hidden'}>Todo mês ela entra sozinha na fatura do cartão, no dia do vencimento.</p>` : ''}
+      <div id="boxContaPaga" ${cartaoIt?'hidden':''}><div class="switch f"><span>Já paguei</span><button type="button" class="tg ${form.v.pago?'on':''}" data-act="tgPago"></button></div>
       <div class="row2"><div class="f"><label>Valor pago</label><input class="num" id="fValor" inputmode="decimal" placeholder="igual ao planejado" value="${it&&it.pago?moneyVal(it.valor):''}"></div>
-      <div class="f"><label>Data do pagamento</label><input type="date" id="fData" value="${it?it.data||'':''}"></div></div>
+      <div class="f"><label>Data do pagamento</label><input type="date" id="fData" value="${it?it.data||'':''}"></div></div></div>
       <button class="btn pri" data-act="salvarForm">Salvar</button>${del}`);
   }
   if (tipo==='reservas'){
@@ -3662,7 +3676,8 @@ function salvarForm(){
     if (v.pago && !valor) valor = planejado;
     if (!planejado && !valor) return toast('Informe o valor planejado');
     const venc = Math.min(31, Math.max(0, parseInt(g('fVenc'))||0)) || '';
-    obj = { nome, planejado, valor: v.pago?valor:0, pago:v.pago, data: v.pago?(g('fData')||dataHoje()):'', venc };
+    obj = v.contaCartao ? { nome, planejado: planejado || valor, valor:0, pago:false, data:'', venc, cartao:v.contaCartao }
+      : { nome, planejado, valor: v.pago?valor:0, pago:v.pago, data: v.pago?(g('fData')||dataHoje()):'', venc, cartao:undefined };
   }
   if (tipo==='reservas'){
     let valor=Math.abs(parseValor(g('fValor'))); if(!valor) return toast('Informe o valor');
@@ -3726,6 +3741,8 @@ document.addEventListener('click', e=>{
     const name = t.parentElement.dataset.chips;
     t.parentElement.querySelectorAll('button').forEach(b=>b.classList.toggle('on', b===t));
     form.v[name] = name==='essencial' ? t.dataset.v==='Sim' : name==='cartao' ? ((S.cartoes||[]).find(c=>c.nome===t.dataset.v)||{}).id : t.dataset.v;
+    if (name==='contaCartao'){ const c = (S.cartoes||[]).find(x=>'💳 '+x.nome===t.dataset.v); form.v.contaCartao = c ? c.id : '';
+      document.getElementById('boxContaPaga').hidden = !!c; document.getElementById('notaContaCartao').hidden = !c; return; }
     if (name==='cartao') infoParcelas();
     if (name==='tipoDiv'){ form.v.tipo = t.dataset.v; return; }
     if (name==='tipoEnt'){ form.v.fixa = t.dataset.v.startsWith('Fixo'); const b = document.getElementById('boxEntParc'); if (b) b.hidden = t.dataset.v !== 'Parcelado';
@@ -3878,7 +3895,7 @@ document.addEventListener('click', e=>{
     const p = prevYM(cur.y,cur.m), Mp = mes(p.y,p.m), M = mes(cur.y,cur.m,true);
     const existentes = new Set(M.contas.map(c=>c.nome.toLowerCase()));
     let n=0; Mp.contas.forEach(c=>{ if(existentes.has(c.nome.toLowerCase())) return;
-      M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'' }); n++; });
+      M.contas.push({ id:uid(), nome:c.nome, planejado:c.planejado||c.valor, valor:0, pago:false, data:'', venc:c.venc||'', ...(c.cartao ? { cartao:c.cartao } : {}) }); n++; });
     salvar(); render(); toast(n ? n+' contas copiadas' : 'Essas contas já estão no mês');
   }
   else if (a==='orcamentos'){ abrirOrcamentos(); }
@@ -4246,6 +4263,8 @@ function mostrarNovidades(){
 document.addEventListener('click', e => { if (e.target.closest('[data-upd]')) location.reload(); });
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { escondidoEm = Date.now(); return; }
+  // O app pode ficar dias aberto em segundo plano: virou o dia, recarrega para "hoje" e o mês aberto ficarem certos.
+  if (new Date().toDateString() !== hoje.toDateString() && !ocupado()) return location.reload();
   checarVersao(escondidoEm && Date.now() - escondidoEm > 30*60e3);
 });
 window.addEventListener('online', () => checarVersao(false));
