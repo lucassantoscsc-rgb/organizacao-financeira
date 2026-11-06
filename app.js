@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 83;
+const APP_VERSAO = 84;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -2553,6 +2553,7 @@ const ICON = {
 };
 
 function render(){
+  agendarVoltar();
   memo = {}; memoParc = null; memoFat = null; memoOrc = {};
   if (aba==='ajustes' && temSenha()) bioDisponivel().then(ok => { const l = document.getElementById('linhaBio'); if (l) l.hidden = !ok; });
   if (CONFIG.exigirCodigo && !S.liberado) return renderAcesso();
@@ -3509,9 +3510,60 @@ function telaAjustes(){
 /* ---------- formulários (bottom sheet) ---------- */
 const $ov = document.getElementById('overlay'), $sh = document.getElementById('sheet');
 let form = null;
-function abrir(html){ $sh.innerHTML = '<div class="grab"></div>'+html; $ov.classList.add('open'); const i=$sh.querySelector('input.money'); if(i&&!i.value) setTimeout(()=>i.focus(),250); }
-function fechar(){ $ov.classList.remove('open'); form=null; if (conqPendente){ conqPendente = false; setTimeout(checarConquistas, 400); } }
-$ov.addEventListener('click', e=>{ if(e.target===$ov){ if ($sh.querySelector('.novidades')){ S.versaoVista = APP_VERSAO; salvar(); } fechar(); } });
+function abrir(html){ $sh.innerHTML = '<div class="sh-x-w"><button type="button" class="sh-x" data-act="fecharSheet" aria-label="Fechar">✕</button></div><div class="grab"></div>'+html; $sh.scrollTop = 0; $ov.classList.add('open'); agendarVoltar(); const i=$sh.querySelector('input.money'); if(i&&!i.value) setTimeout(()=>i.focus(),250); }
+function fechar(){ $ov.classList.remove('open'); form=null; agendarVoltar(); if (conqPendente){ conqPendente = false; setTimeout(checarConquistas, 400); } }
+// Fechar por decisão da pessoa: toque fora, ✕, arrastar para baixo ou botão/gesto de voltar.
+function fecharSheet(){ if ($sh.querySelector('.novidades')){ S.versaoVista = APP_VERSAO; salvar(); } fechar(); }
+$ov.addEventListener('click', e=>{ if(e.target===$ov) fecharSheet(); });
+
+// Arrastar o painel para baixo fecha. Em formulário, só pela parte de cima, para não perder o que foi digitado sem querer.
+let arraste = null;
+$sh.addEventListener('touchstart', e => {
+  arraste = null;
+  if (e.touches.length !== 1 || $sh.scrollTop > 0 || e.target.closest('input[type=range],.sh-x')) return;
+  const t = e.touches[0], topo = t.clientY - $sh.getBoundingClientRect().top;
+  if (form && topo > 56) return;
+  arraste = { x:t.clientX, y:t.clientY, dy:0, ativo:false };
+}, { passive:true });
+$sh.addEventListener('touchmove', e => {
+  if (!arraste) return;
+  const t = e.touches[0], dx = t.clientX - arraste.x, dy = t.clientY - arraste.y;
+  if (!arraste.ativo){
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (dy <= 0 || Math.abs(dx) > dy || $sh.scrollTop > 0){ arraste = null; return; }
+    arraste.ativo = true; $sh.style.transition = 'none';
+  }
+  arraste.dy = Math.max(0, dy); $sh.style.transform = `translateY(${arraste.dy}px)`;
+  if (e.cancelable) e.preventDefault();
+}, { passive:false });
+function fimArraste(){
+  if (!arraste || !arraste.ativo){ arraste = null; return; }
+  const fecha = arraste.dy > 110; arraste = null;
+  $sh.style.transition = ''; $sh.style.transform = '';
+  if (fecha) fecharSheet();
+}
+$sh.addEventListener('touchend', fimArraste);
+$sh.addEventListener('touchcancel', fimArraste);
+
+// Botão/gesto de voltar do celular: fecha o painel aberto, depois volta ao Início, e só então sai do app.
+let guardaVoltar = false, ignorarPop = false, timerVoltar = 0;
+function agendarVoltar(){
+  clearTimeout(timerVoltar);
+  timerVoltar = setTimeout(() => {
+    if (ignorarPop) return agendarVoltar();
+    const precisa = $ov.classList.contains('open') || aba !== 'resumo';
+    if (precisa && !guardaVoltar){ history.pushState({ tino:1 }, ''); guardaVoltar = true; }
+    else if (!precisa && guardaVoltar){ guardaVoltar = false; ignorarPop = true; history.back(); }
+  }, 60);
+}
+window.addEventListener('popstate', () => {
+  if (ignorarPop){ ignorarPop = false; return; }
+  guardaVoltar = false;
+  if (travado || pinModo || tour !== null || document.getElementById('retro')){ history.pushState({ tino:1 }, ''); guardaVoltar = true; return; }
+  if ($ov.classList.contains('open')) fecharSheet();
+  else if (aba !== 'resumo'){ aba = 'resumo'; render(); scrollTo(0,0); }
+  agendarVoltar();
+});
 
 const dataHoje = () => { const d=new Date(); return key(d.getFullYear(),d.getMonth())+'-'+String(d.getDate()).padStart(2,'0'); };
 const dataPadrao = () => (cur.y===hoje.getFullYear() && cur.m===hoje.getMonth()) ? dataHoje() : key(cur.y,cur.m)+'-01';
@@ -3781,6 +3833,7 @@ document.addEventListener('click', e=>{
   }
   if (t.dataset.cat){ abrirCategoria(t.dataset.cat); return; }
   if (t.dataset.cof){ abrirCofrinho(t.dataset.cof); return; }
+  if (t.dataset.act==='fecharSheet'){ fecharSheet(); return; }
   if (t.dataset.tab){ fechar(); aba=t.dataset.tab; render(); scrollTo(0,0); return; }
   if (t.dataset.sub){ subLanc=t.dataset.sub; render(); return; }
   if (t.dataset.cartao && !t.closest('[data-chips]')){ editarCartao(t.dataset.cartao); return; }
@@ -4567,7 +4620,13 @@ if (DEMO){
   }
 }
 render();
-if (S.liberado && S.perfil.ok && temSenha()){ aoDestravar = iniciarApp; travar(); } else iniciarApp();
+// Recarregar a página (ex.: puxar a tela no navegador) dentro do minuto da trava não pede senha e volta para a mesma tela.
+let recarga = null;
+try { recarga = JSON.parse(sessionStorage.getItem('tinoRecarga')); sessionStorage.removeItem('tinoRecarga'); } catch(e){}
+const recargaRecente = !!recarga && Date.now() - recarga.em < TEMPO_TRAVA;
+if (recargaRecente && aba === 'resumo' && ['analise','lanc','contas','metas','ajustes'].includes(recarga.aba)) aba = recarga.aba;
+window.addEventListener('pagehide', () => { if (travado || tour !== null) return; try { sessionStorage.setItem('tinoRecarga', JSON.stringify({ em:Date.now(), aba })); } catch(e){} });
+if (S.liberado && S.perfil.ok && temSenha() && !recargaRecente){ aoDestravar = iniciarApp; travar(); } else iniciarApp();
 if (!DEMO) verificarAcesso();
 checarVersao(false);
 window.addEventListener('online', verificarAcesso);
