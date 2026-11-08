@@ -24,7 +24,7 @@ const CONFIG = {
 };
 
 // Versão do código. Ao publicar: aumente aqui, em versao.json e o CACHE do sw.js.
-const APP_VERSAO = 84;
+const APP_VERSAO = 85;
 // Monitor de erros: se algo quebrar no aparelho do cliente, avisa o servidor (só dados técnicos, no máximo 5 por vez que o app abre).
 (function(){
   const vistos = new Set();
@@ -1030,29 +1030,38 @@ async function desligarNuvem(){
    No mês atual, o destaque é "Pode gastar hoje": o que sobra (já descontando as contas a pagar)
    dividido pelos dias que faltam. A barra compara os gastos do dia a dia com o quanto do mês já passou:
    contas fixas e faturas ficam de fora, porque costumam cair todas no começo do mês. */
+// "R$ 13.099 entradas − R$ 11.495 que faltaram em outubro": o saldo do mês anterior aparece separado das entradas.
+function linhaEntradas(C){
+  const s = C.saldoAnterior || 0, mesAnt = MESES[prevYM(cur.y,cur.m).m].toLowerCase();
+  return `${brl(C.entradasLanc)} entradas` + (Math.abs(s) >= 0.005 ? (s > 0 ? ` + ${brl(s)} que sobraram em ${mesAnt}` : ` − ${brl(-s)} que faltaram em ${mesAnt}`) : '');
+}
 function heroResumo(C){
   const neg = C.restante < 0;
   if (key(cur.y,cur.m) !== chaveHoje()) return `<section class="card hero">
     <div class="lbl">Restante para gastar</div>
     <div class="big num ${neg && !S.ocultar?'neg':''}">${brl(C.restante)}</div>
-    <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas</div></section>`;
+    <div class="eq num">${linhaEntradas(C)} − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas</div></section>`;
   const D = diasNoMes(cur.y,cur.m), d = hoje.getDate(), rest = D - d + 1;
   const livre = C.restante - C.contasPend, porDia = livre / rest;
   const ritmo = C.gastosVista / d, fim = livre - ritmo * (rest - 1);
   const base = livre + C.gastosVista;   // o que estava livre para o dia a dia neste mês
   const usado = base > 0 ? Math.min(100, Math.max(0, C.gastosVista / base * 100)) : 0, passou = d / D * 100;
-  const st = C.entradas <= 0 ? null : livre < 0 ? ['ruim','⚠️ Mês no vermelho'] : usado <= passou + 5 ? ['ok','✅ No ritmo certo'] : usado <= passou + 20 ? ['atencao','👀 Um pouco acima do ritmo'] : ['ruim','⚠️ Gastando rápido'];
+  const semEntrada = !(C.entradasLanc > 0 || C.saldoAnterior > 0);
+  const st = semEntrada ? null : livre < 0 ? ['ruim','⚠️ Mês no vermelho'] : usado <= passou + 5 ? ['ok','✅ No ritmo certo'] : usado <= passou + 20 ? ['atencao','👀 Um pouco acima do ritmo'] : ['ruim','⚠️ Gastando rápido'];
   const fut = comprometidoFuturo();
+  const saldo = S.destaque === 'saldo';
   return `<section class="card hero hero2">
-    <div class="h2-lbl"><span>Pode gastar hoje</span>${st ? `<span class="st ${st[0]}">${st[1]}</span>` : ''}</div>
-    <div class="big num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</div>
-    <div class="h2-sub num">${C.entradas <= 0 ? 'Cadastre o que entra no mês (salário, renda) e o Tino calcula para você.' : livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>
+    <div class="h2-lbl"><span>${saldo ? 'Saldo do mês' : 'Pode gastar hoje'}</span>${st ? `<span class="st ${st[0]}">${st[1]}</span>` : ''}</div>
+    ${saldo ? `<div class="big num ${neg && !S.ocultar?'neg':''}">${brl(C.restante)}</div>
+    <div class="h2-sub num">Entrou <b>${brl(C.entradasLanc)}</b> · saiu <b>${brl(C.saidas + C.reservas)}</b>${Math.abs(C.saldoAnterior||0) >= 0.005 ? ` · ${C.saldoAnterior > 0 ? '+' : '−'}${brl(Math.abs(C.saldoAnterior))} de ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}` : ''}</div>
+    ${C.contasPend > 0 ? `<div class="h2-sub num">Depois das contas a pagar: <b>${brl(livre)}</b></div>` : ''}` : `<div class="big num ${porDia<0 && !S.ocultar?'neg':''}">${brl(Math.max(porDia,0))}</div>
+    <div class="h2-sub num">${semEntrada ? 'Cadastre o que entra no mês (salário, renda) e o Tino calcula para você.' : livre >= 0 ? `Sobram <b>${brl(livre)}</b> para ${rest === 1 ? 'hoje' : `os próximos ${rest} dias`}` : `Faltam <b>${brl(-livre)}</b> para fechar o mês`}</div>`}
     <div class="rapidas duas">
       <button data-act="possoComprar"><span>🤔</span>Posso comprar?</button>
       <button data-act="colar"><span>📋</span>Colar do banco</button>
     </div>
     <details class="como"><summary>Como chegamos nesse número</summary>
-      <div class="eq num">${brl(C.entradas)} entradas − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas = <b>${brl(C.restante)}</b></div>
+      <div class="eq num">${linhaEntradas(C)} − ${brl(C.saidas)} saídas − ${brl(C.reservas)} reservas = <b>${brl(C.restante)}</b></div>
       ${C.contasPend > 0 ? `<div class="eq num">− ${brl(C.contasPend)} de contas a pagar = <b>${brl(livre)}</b></div>` : ''}
       <div class="eq num">÷ ${rest} dia${rest>1?'s':''} = <b>${brl(Math.max(porDia,0))} por dia</b></div>
       <div class="eq num">No ritmo atual (${brl0(ritmo)}/dia), o mês termina com <b class="${fim<0 && !S.ocultar?'neg':''}">${brl(fim)}</b>.</div>
@@ -1065,28 +1074,28 @@ function heroResumo(C){
    Da entrada do mês para as maiores categorias, o que foi guardado e o que sobrou. */
 const CORES_FLUXO = ['#0d9668','#e9a91b','#3b82f6','#e05a47','#8b5cf6','#94a3a0'];
 function cardFluxo(C){
-  if (!(C.entradas > 0) || !(C.consumo > 0)) return '';
+  if (!(C.entradasLanc > 0) || !(C.consumo > 0)) return '';
   const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
   const nos = cats.slice(0,5).map(([c,v],i)=>({ nome:nomeCat(c), e:emojiCat(c), v, cor:CORES_FLUXO[i] }));
   const outras = soma(cats.slice(5), x=>x[1]); if (outras > 0) nos.push({ nome:'Outras', e:'•••', v:outras, cor:CORES_FLUXO[5] });
   if (C.reservas > 0) nos.push({ nome:'Guardado', e:'🐷', v:C.reservas, cor:'#14b8a6' });
-  const sobra = C.entradas - C.consumo - C.reservas;
+  const sobra = C.entradasLanc - C.consumo - C.reservas;
   if (sobra > 0) nos.push({ nome:'Sobrou', e:'✨', v:sobra, cor:'#c7d6cf', sobra:true });
   const tot = soma(nos, n=>n.v), W = 340, X1 = 14, X2 = 176, GAP = 8, MIN = 30;
   const alt = nos.map(n => Math.max(n.v / tot * 260, MIN)), H = soma(alt, a=>a) + GAP * (nos.length - 1);
-  const esq = Math.min(1, C.entradas / tot) * H;
+  const esq = Math.min(1, C.entradasLanc / tot) * H;
   let y = 0, ye = (H - esq) / 2, rib = '', bar = '', lab = '';
   nos.forEach((n, i) => {
     const h = alt[i], he = n.v / tot * esq;
     rib += `<path d="M${X1},${ye} C${(X1+X2)/2},${ye} ${(X1+X2)/2},${y} ${X2},${y} L${X2},${y+h} C${(X1+X2)/2},${y+h} ${(X1+X2)/2},${ye+he} ${X1},${ye+he} Z" fill="${n.cor}" opacity="${n.sobra?.45:.32}"/>`;
     bar += `<rect x="${X2}" y="${y}" width="8" height="${h}" rx="3" fill="${n.cor}"/>`;
-    lab += `<text x="${X2+14}" y="${y+h/2-1}" class="fx-n">${esc(n.nome)}</text><text x="${X2+14}" y="${y+h/2+13}" class="fx-v">${S.ocultar?OCULTO:brl0(n.v)} · ${Math.round(n.v/C.entradas*100)}%</text>`;
+    lab += `<text x="${X2+14}" y="${y+h/2-1}" class="fx-n">${esc(n.nome)}</text><text x="${X2+14}" y="${y+h/2+13}" class="fx-v">${S.ocultar?OCULTO:brl0(n.v)} · ${Math.round(n.v/C.entradasLanc*100)}%</text>`;
     y += h + GAP; ye += he;
   });
   return `<section class="card"><h3>Para onde foi seu dinheiro <small>${MESES[cur.m]}</small></h3>
     <svg class="fluxo" viewBox="0 0 ${W} ${H+4}" role="img" aria-label="Fluxo das entradas para as categorias de gasto">
       <rect x="0" y="${(H-esq)/2}" width="${X1}" height="${esq}" rx="4" fill="var(--teal)"/>${rib}${bar}${lab}</svg>
-    <div class="note">Entradas do mês: <b class="num">${brl(C.entradas)}</b>. ${sobra < 0 ? `Os gastos e reservas passaram ${brl(-sobra)} das entradas (inclui compras no crédito que ainda vão para a fatura).` : 'Porcentagens sobre as entradas do mês.'}</div></section>`;
+    <div class="note">Entradas do mês: <b class="num">${brl(C.entradasLanc)}</b>. ${sobra < 0 ? `Os gastos e reservas passaram ${brl(-sobra)} das entradas (inclui compras no crédito que ainda vão para a fatura).` : 'Porcentagens sobre as entradas do mês.'}</div></section>`;
 }
 
 /* ---------- minha semana ----------
@@ -2609,7 +2618,9 @@ function cardEsteMes(C){
       <div><span>Saiu</span><b class="num">${brl0(C.saidas + C.reservas)}</b></div>
       <div><span>Sobrou</span><b class="num ${C.restante<0 && !S.ocultar?'neg':''}">${brl0(C.restante)}</b></div>
     </div>
-    ${Math.abs(C.saldoAnterior||0) >= 0.5 ? `<p class="note" style="margin:-6px 0 12px">${C.saldoAnterior > 0 ? `O que sobrou inclui <b>${brl0(C.saldoAnterior)}</b> que vieram de ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.` : `O que sobrou já desconta <b>${brl0(-C.saldoAnterior)}</b> que faltaram em ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.`}</p>` : ''}
+    ${(C.saldoAnterior||0) <= -0.5 ? `<div class="mr-ant"><div>O que sobrou já desconta <b>${brl0(-C.saldoAnterior)}</b> que faltaram em ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}. Se ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()} ficou incompleto (por exemplo, faltou lançar o que você recebeu), confira ou comece este mês do zero.</div>
+      <div class="mr-ant-bt"><button data-act="prev">Ver ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}</button><button data-act="semCarry">Começar do zero</button></div></div>` : ''}
+    ${(C.saldoAnterior||0) >= 0.5 ? `<p class="note" style="margin:-6px 0 12px">${C.saldoAnterior > 0 ? `O que sobrou inclui <b>${brl0(C.saldoAnterior)}</b> que vieram de ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.` : ''}</p>` : ''}
     ${cats.length ? `<div class="hbars mr-cats">${cats.map(([c,v])=>`<button class="hb" data-cat="${esc(c)}" aria-label="${esc(nomeCat(c))}: ${brl(v)}">
       <span class="hb-l"><span class="hb-e">${emojiCat(c)}</span>${esc(nomeCat(c))}</span><span class="hb-v num">${brl(v)}</span>
       <span class="hb-t"><span style="width:${Math.max(v/max*100,1.5)}%"></span></span></button>`).join('')}</div>` : ''}
@@ -2632,11 +2643,12 @@ function telaAnalise(){
   let html = `<button class="voltar-inicio" data-tab="resumo">‹ Início</button><h2 class="tela-tit">Análise do mês</h2>`;
 
   const grade = `<div class="grid">
-    ${stat('Entradas','#0d9668',C.entradas, variacao(C.entradas, P&&P.entradas, false))}
-    ${stat('Saídas','#dc4545',C.saidas, variacao(C.saidas, P&&P.saidas, true))}
+    ${stat('Entradas','#0d9668',C.entradasLanc, variacao(C.entradasLanc, P&&P.entradasLanc, false))}
+    ${stat('Saiu da conta','#dc4545',C.saidas, variacao(C.saidas, P&&P.saidas, true))}
     ${stat('Reservas & invest.','#14b8a6',C.reservas, variacao(C.reservas, P&&P.reservas, false))}
     ${stat('Uso do crédito','#e9a91b',C.credito, variacao(C.credito, P&&P.credito, true))}
-  </div>`;
+  </div>${Math.abs(C.saldoAnterior||0) >= 0.5 ? `<p class="note" style="margin:-4px 0 14px">${C.saldoAnterior > 0 ? `Além das entradas, vieram <b>${brl(C.saldoAnterior)}</b> que sobraram em ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.` : `Além disso, este mês desconta <b>${brl(-C.saldoAnterior)}</b> que faltaram em ${MESES[prevYM(cur.y,cur.m).m].toLowerCase()}.`} Sobrou no mês: <b>${brl(C.restante)}</b>.</p>` : ''}
+  <p class="note" style="margin:-4px 0 14px"><b>Saiu da conta</b>: compras à vista, contas pagas e a fatura do cartão. Em <b>Onde você gastou</b>, as compras no crédito contam no mês em que você comprou.</p>`;
   if (C.credito > 0) html += `<div class="alert"><span>💳</span><div><b>${brl(C.credito)} no crédito</b> ainda não saiu do seu saldo. Esse valor entra nas saídas quando a fatura vencer${(S.cartoes||[]).length?'':` (em ${MESES[prox.m]})`}.</div></div>`;
   if (C.faturaAnterior > 0){ const fs = faturasPorCartao(cur.y,cur.m);
     html += `<div class="alert info"><span>📥</span><div>${fs.length>1?'As faturas':'A fatura'} deste mês ${fs.map(f=>`<b>${f.cartao?esc(f.cartao.nome)+' ':''}${brl(f.valor)}</b>${f.cartao?` (vence dia ${f.cartao.vencimento})`:''}`).join(', ')} já ${fs.length>1?'estão somadas':'está somada'} nas saídas.</div></div>`; }
@@ -2945,7 +2957,7 @@ function alertasOrcamento(C){
 let catsAbertas = false;
 function cardCategorias(C){
   const cats = Object.entries(C.cats).filter(([,v])=>v>0).sort((a,b)=>b[1]-a[1]);
-  let h = `<section class="card" id="cardCategorias"><h3>Onde você gastou <small>${brl(C.consumo)}</small></h3>`;
+  let h = `<section class="card" id="cardCategorias"><h3>Onde você gastou <small>${brl(C.consumo)} em compras</small></h3>`;
   if (!cats.length) return h + `<div class="note">Seus gastos por categoria aparecem aqui.</div></section>`;
   const max = cats[0][1];
   h += `<div class="hbars" role="list">`;
@@ -3223,9 +3235,9 @@ function telaLanc(){
     <button class="${subLanc==='reservas'?'on':''}" data-sub="reservas">Reservas</button>
     <button class="${subLanc==='calendario'?'on':''}" data-sub="calendario">Calendário</button></div>`;
   if (subLanc==='entradas'){
-    const tot = C.entradas;
-    h += `<div class="totalrow"><span>Total de entradas</span><b class="num">${brl(tot)}</b></div><div class="list">`;
-    if (C.saldoAnterior) h += `<div class="item"><div class="ic">↪️</div><div class="tx"><div class="t1">Saldo do mês anterior <span class="tag auto">automático</span></div><div class="t2">${tot?(C.saldoAnterior/tot*100).toFixed(1):0}% das entradas</div></div><div class="val num">${brl(C.saldoAnterior)}</div></div>`;
+    const tot = C.entradasLanc, mesAnt = MESES[prevYM(cur.y,cur.m).m].toLowerCase();
+    h += `<div class="totalrow"><span>Entrou no mês</span><b class="num">${brl(tot)}</b></div><div class="list">`;
+    if (C.saldoAnterior) h += `<div class="item"><div class="ic">↪️</div><div class="tx"><div class="t1">Saldo do mês anterior <span class="tag auto">automático</span></div><div class="t2">${C.saldoAnterior > 0 ? 'Sobrou em ' + mesAnt : 'Faltou em ' + mesAnt} · não soma no total acima</div></div><div class="val num ${C.saldoAnterior < 0 && !S.ocultar ? 'neg' : ''}">${brl(C.saldoAnterior)}</div></div>`;
     M.entradas.forEach(e=>{ h += `<button class="item" data-edit="entradas" data-id="${e.id}"><div class="ic">💰</div><div class="tx"><div class="t1">${esc(e.nome)}${e.fixa?' <span class="tag auto">todo mês</span>':''}</div><div class="t2">${tot?(e.valor/tot*100).toFixed(1):0}% das entradas${e.data?' · '+fmtData(e.data):''}</div></div><div class="val num up">${brl(e.valor)}</div></button>`; });
     if (!M.entradas.length && !C.saldoAnterior) h += vazio('💰','Nenhuma entrada neste mês','Adicione seu salário, renda extra ou vendas.');
     h += `</div>`;
@@ -3470,6 +3482,9 @@ function telaAjustes(){
   <section class="card"><h3>Minha renda varia</h3>
     <p class="note" style="margin:0 0 12px">${S.rendaVariavel && S.rendaVariavel.ativo ? `Ligado · renda segura de <b>${brl0(S.rendaVariavel.segura)}</b> por mês.` : 'Para autônomos, comissão ou freela: acompanhe o que já entrou no mês e guarde o que vier acima do normal.'}</p>
     <button class="btn sec" data-act="rendaVariavel">${S.rendaVariavel && S.rendaVariavel.ativo ? 'Ajustar renda segura' : 'Ativar'}</button></section>
+  <section class="card"><h3>Destaque do Início</h3>
+    <div class="temas">${[['gastar','📅 Pode gastar hoje'],['saldo','⚖️ Saldo do mês']].map(([v,l])=>`<button class="${(S.destaque||'gastar')===v?'on':''}" data-act="destaque" data-v="${v}">${l}</button>`).join('')}</div>
+    <p class="note">${S.destaque==='saldo' ? 'Mostra quanto sobrou ou faltou no mês: tudo o que entrou menos tudo o que saiu.' : 'Mostra quanto dá para gastar por dia até o fim do mês, já separando as contas a pagar.'}</p></section>
   <section class="card"><h3>Saldo entre meses</h3>
     <div class="switch"><span>Levar o que sobrou para o mês seguinte</span><button class="tg ${S.carry?'on':''}" data-act="carry" aria-label="Alternar"></button></div>
     <p class="note">Ligado: o “restante para gastar” de um mês entra como entrada no próximo.</p></section>
@@ -3868,6 +3883,10 @@ document.addEventListener('click', e=>{
   if (a==='excluirConta'){ abrirExcluirConta(); return; }
   if (a==='excluirConfirmar'){ excluirConta(t); return; }
   if (a==='orcAcum'){ S.orcAcumular = S.orcAcumular ? null : { desde: key(prevYM(hoje.getFullYear(), hoje.getMonth()).y, prevYM(hoje.getFullYear(), hoje.getMonth()).m) }; t.classList.toggle('on', !!S.orcAcumular); salvar(); render(); toast(S.orcAcumular ? 'Sobras passam a acumular a partir deste mês ✓' : 'Acúmulo desligado'); return; }
+  if (a==='destaque'){ S.destaque = t.dataset.v; salvar(); render(); toast(S.destaque === 'saldo' ? 'O Início agora mostra o saldo do mês ✓' : 'O Início agora mostra o Pode gastar hoje ✓'); return; }
+  if (a==='semCarry'){
+    if (!confirm('Começar cada mês do zero?\n\nO que sobrou ou faltou em um mês deixa de passar para o seguinte. Seus lançamentos não mudam, e dá para religar em Ajustes › Saldo entre meses.')) return;
+    S.carry = false; salvar(); render(); toast('Pronto: cada mês começa do zero ✓'); return; }
   if (a==='tom'){ S.tom = t.dataset.v; salvar(); render(); toast(S.tom === 'sincero' ? 'Modo sincero ligado 😏' : 'Modo gentil ligado 🙂'); return; }
   if (a==='rendaVariavel'){ abrirRendaVariavel(); return; }
   if (a==='salvarRenda'){ const v = parseValor(document.getElementById('rvSegura').value); if (!(v > 0)) return toast('Informe a renda segura'); S.rendaVariavel = { ativo:true, segura:v }; salvar(); fechar(); render(); toast('Renda variável ativada ✓'); return; }
